@@ -2,12 +2,12 @@
 name: joewrks-pixel-art
 description: "Generate, edit and verify pixel artwork from the user's concept and references. Use for pixel characters, portraits, props, icons, environments and sprites requiring a fixed grid, palette, one-dot contours and direct saved-image review; not ordinary UI layout or general illustration."
 metadata:
-  version: "2.23.0"
+  version: "2.23.1"
 ---
 
 # JOEWRKS Pixel Art
 
-작업 전 [제작 절차](references/workflow.md)를 읽고, 실행 파일을 만들 때 [입력 계약](references/input-contract.md)을 확인한다. 설치·호출 방법은 [사용법](README.md), 검사 항목은 [규칙 목록](references/workflow-rules.json)에 있다.
+작업 전 [제작 절차](references/workflow.md)를 읽고, 실행 파일을 만들 때 [입력 계약](references/input-contract.md)을 확인한다.
 
 ## 최우선 판단
 

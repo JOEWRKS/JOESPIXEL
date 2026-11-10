@@ -2,6 +2,18 @@
 
 아래는 현재 지원 경로의 필드 안내다. 관찰 입력을 자동 생성하는 양식이나 PASS 템플릿이 아니다. 좌표는 명시된 원본 공간을 사용한다. 목적지 도트를 지정하여 그림을 덧칠하는 지시는 받지 않는다.
 
+## 실행 명령
+
+에이전트가 관찰 입력과 단계 증거를 준비한 뒤 스킬 폴더에서 실행한다.
+
+```text
+node scripts/run-pixel-workflow.cjs prepare /absolute/path/job.json /absolute/path/new-run
+node scripts/run-pixel-workflow.cjs finalize /absolute/path/new-run /absolute/path/review.json
+node scripts/run-pixel-workflow.cjs verify /absolute/path/new-run
+```
+
+`prepare`는 후보와 미검수 기록만 만든다. 직접 검수 후 `finalize`가 재현 검증을 거쳐 `delivery/native.png`, `display.png`, `receipt.json`을 저장한다. `verify`는 저장본·입력·코드 결속을 확인한다. 기존 실행 디렉터리를 덮어쓰지 않는다.
+
 ## 파일과 경로
 
 증거 파일은 `{ "path": "/absolute/path/file.png", "sha256": "64자리 SHA256" }` 형태로 묶는다. 경로는 실행 컴퓨터의 절대 경로이며 파일 내용이 바뀌면 해시·해당 단계·후속 단계를 함께 갱신해야 한다. 계약에 과거 `redesign`, `measuredConversion`, `mode: scoped-repair`를 넣으면 차단한다.
@@ -94,7 +106,7 @@
 
 ## 단계 기록
 
-각 레코드는 `stage`, `name`, `status`, `reviewer`, `reference`, `input`, `output`, `palette`, `grid`, `evidence`, `checks`를 가진다. 필수 검사 키는 `stage-gates.cjs`의 `SEVEN_CHECKS`, 세부 관찰은 `detailChecksForStage`가 기준이다. `workflow-rules.json`은 추가 시각 판정까지 포함한 목록이다.
+각 레코드는 `stage`, `name`, `status`, `reviewer`, `reference`, `input`, `output`, `palette`, `grid`, `evidence`, `checks`를 가진다. 필수 검사 키는 `stage-gates.cjs`의 `SEVEN_CHECKS`, 세부 관찰은 `detailChecksForStage`가 기준이다.
 
 - 1단계: `colorGroups`, `execution: {version:1, route:fixed-asset-grid, sampling:source-region-area, operations:[...], fixedGridUserRequest:"사용자 조건과 선정 근거"}`. `operations`는 사용한 `eyePolicy/formPolicy/outlinePolicy/materialPlan`을 명시한다.
 - 2단계: 서로 다른 격자의 실제 `native/expanded/outlineMask` 증거, 필수 경계 목록, 경계별 `coverage/width/continuity/flow/clearance` 관찰, 선택 이유를 `selection`에 기록한다. 스키마는 `assertCapacitySelection`에서 검증한다.

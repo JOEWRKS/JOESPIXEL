@@ -14,7 +14,7 @@ const write = (p, value) => fs.writeFileSync(p, JSON.stringify(value, null, 2)+'
 const need = (ok, message) => { if (!ok) throw new Error(message); };
 const artifact = p => ({path:path.resolve(p), sha256:hash(fs.readFileSync(p))});
 // Fingerprint every shipped runtime module; tests never participate in rendering.
-const converters = () => [...fs.readdirSync(__dirname).filter(n => n.endsWith('.cjs') && !n.startsWith('test-')).sort(), '../references/workflow-rules.json', '../package.json', '../package-lock.json']
+const converters = () => [...fs.readdirSync(__dirname).filter(n => n.endsWith('.cjs') && !n.startsWith('test-')).sort(), '../SKILL.md', '../references/workflow.md', '../references/input-contract.md', '../package.json', '../package-lock.json']
   .map(n => artifact(path.join(__dirname, n)));
 function checkArtifact(a) {
   need(a && path.isAbsolute(a.path) && /^[a-f0-9]{64}$/.test(a.sha256), 'Absolute path and SHA256 required');

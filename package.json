@@ -1,13 +1,12 @@
 {
   "name": "joespixel",
-  "version": "2.23.0",
+  "version": "2.23.1",
   "private": true,
   "description": "JOEWRKS pixel-art skill and fixed-grid verification workflow",
   "engines": {
     "node": ">=20"
   },
   "scripts": {
-    "test": "node scripts/test-package.cjs",
     "pixel": "node scripts/run-pixel-workflow.cjs"
   },
   "dependencies": {
