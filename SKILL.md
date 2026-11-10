@@ -2,12 +2,16 @@
 name: joewrks-pixel-art
 description: "Generate, edit and verify pixel artwork from the user's concept and references. Use for pixel characters, portraits, props, icons, environments and sprites requiring a fixed grid, palette, one-dot contours and direct saved-image review; not ordinary UI layout or general illustration."
 metadata:
-  version: "2.23.1"
+  version: "2.23.2"
 ---
 
 # JOEWRKS Pixel Art
 
 작업 전 [제작 절차](references/workflow.md)를 읽고, 실행 파일을 만들 때 [입력 계약](references/input-contract.md)을 확인한다.
+
+## 최초 설치 준비
+
+저장소 루트가 스킬이다. 설치 도구에는 `--path . --name joewrks-pixel-art`를 전달하여 폴더명을 자동 지정한다. 사용자가 폴더 이름을 바꾸거나 터미널을 직접 조작하게 하지 않는다. Node.js 20 이상을 확인하고 스킬 폴더에서 `npm ci --ignore-scripts`로 잠긴 의존성을 설치한다. 실행 환경이 없으면 완료로 보고하지 않는다. 이미지 생성은 Codex의 사용 가능한 이미지 도구를 사용한다.
 
 ## 최우선 판단
 
