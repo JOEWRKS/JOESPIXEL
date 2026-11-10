@@ -24,8 +24,8 @@ const DETAIL_CHECKS={
  hands:['pixelCapacity','contactBoundary','foldsAndGaps','skinPlanes'],
  outline:['sourceScope','localColor','width','continuity','curveFlow','junctions']
 };
-// Drafts establish design, not exact raster pitch. Inspect rasterized contours
-// on stage 3 output, and inspect them again on the final saved artwork.
+// Stage 3 is generated design intent, not a verified pixel grid. Stage 5 is the
+// actual grid draft; its raster is reviewed before the mandatory export lock.
 function detailChecksForStage(stage){
  if(stage===2)return {...DETAIL_CHECKS,outline:['sourceScope','localColor','continuity']};
  if(stage===3)return {outline:DETAIL_CHECKS.outline};

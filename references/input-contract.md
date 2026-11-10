@@ -8,11 +8,12 @@
 
 ```text
 node scripts/run-pixel-workflow.cjs prepare /absolute/path/job.json /absolute/path/new-run
+node scripts/run-pixel-workflow.cjs lock /absolute/path/new-run /absolute/path/review.json
 node scripts/run-pixel-workflow.cjs finalize /absolute/path/new-run /absolute/path/review.json
 node scripts/run-pixel-workflow.cjs verify /absolute/path/new-run
 ```
 
-`prepare`는 후보와 미검수 기록만 만든다. 직접 검수 후 `finalize`가 재현 검증을 거쳐 `delivery/native.png`, `display.png`, `receipt.json`을 저장한다. `verify`는 저장본·입력·코드 결속을 확인한다. 기존 실행 디렉터리를 덮어쓰지 않는다.
+`prepare`는 실제 격자 초안과 미검수 기록을 만든다. 직접 검수 후 `lock`이 변환 재현과 선 검사를 통과한 PNG를 `locked-draft/`에 고정한다. `finalize`는 그 PNG를 그대로 복사해 `delivery/native.png`, `display.png`, `receipt.json`을 저장한다. `verify`는 잠금·입력·코드 결속과 실제 저장 도트 배열의 동일성을 확인한다. 잠금 후 변환/리사이즈를 재실행하지 않으며 기존 실행을 덮어쓰지 않는다. 잠금 없는 과거 실행은 새 `prepare`가 필요하다.
 
 ## 파일과 경로
 
@@ -33,8 +34,8 @@ node scripts/run-pixel-workflow.cjs verify /absolute/path/new-run
 | 필드 | 의미 |
 | --- | --- |
 | `version`, `kind` | `1`, `character` 또는 `other` |
-| `source`, `palette` | 픽셀 초안 PNG, 고정 팔레트 JSON의 파일 증거 |
-| `width`, `height`, `scale` | native 가로/세로, 정수 표시 배율 1–8. 초안 크기는 `[width×scale, height×scale]` |
+| `source`, `palette` | 생성한 설계 원안 PNG, 고정 팔레트 JSON의 파일 증거. `source`는 검수된 native 격자 초안이 아님 |
+| `width`, `height`, `scale` | native 가로/세로, 정수 표시 배율 1–8. 원안 캔버스는 `[width×scale, height×scale]` |
 | `background`, `paletteCount`, `alpha` | 팔레트에 있는 배경색, 목록 색 수, 현재 생성 경로는 `opaque` |
 | `displayTarget` | 실제 사용 크기·위치의 설명 |
 | `sourceAssessment` | `status: READY_FOR_CONVERSION`, `representation: pixel-designed`, `sourceSha256`, 직접 관찰한 `observation` |
@@ -104,6 +105,8 @@ node scripts/run-pixel-workflow.cjs verify /absolute/path/new-run
 
 `compile(PNG, source, palette, width, height, plan, policies)`가 만든 `map`을 PNG로 저장하고 원본과 직접 비교한다. 분류가 잘못되면 계획을 고친 뒤 재생성한다. 최종 픽셀을 칠하여 계획 오류를 숨기지 않는다.
 
+특징 보호는 두 범위를 구분한다. 원본 색 배정에서는 실제 특징 다각형만 제외하고 같은 칸의 인접 재질은 계속 배정한다. 이후 격자 배치에서는 특징이 걸친 칸 전체를 보호한다. 눈 옆 흰 면이나 볼터치를 눈의 보호 범위와 혼동하지 않는다.
+
 ## 단계 기록
 
 각 레코드는 `stage`, `name`, `status`, `reviewer`, `reference`, `input`, `output`, `palette`, `grid`, `evidence`, `checks`를 가진다. 필수 검사 키는 `stage-gates.cjs`의 `SEVEN_CHECKS`, 세부 관찰은 `detailChecksForStage`가 기준이다.
@@ -117,10 +120,10 @@ node scripts/run-pixel-workflow.cjs verify /absolute/path/new-run
 
 ## review.json과 납품
 
-`prepare`의 `review.pending.json`을 별도 파일로 복사해 직접 관찰한 내용을 채운다. 최종 `stageChecks`에는 1–7단계를 넣으며 1–4단계는 실행 시점 계약과 같아야 한다.
+`prepare`의 `review.pending.json`을 별도 파일로 복사해 직접 관찰한 내용을 채운다. 최종 `stageChecks`에는 1–7단계를 넣으며 1–4단계는 실행 시점 계약과 같아야 한다. `gridDraft.native/expanded/grid`는 pending의 실제 격자 초안과 일치해야 한다. `gridDraft.sourceComparison`에는 원안에서 달라진 선 폭·형태·생략을, `gridDraft.visual`에는 격자 초안의 실제 외곽선·필수 형태 검수를 각각 기록한다. 두 관찰은 다른 시각 검사처럼 `{status, observation, evidence}` 형식이며 누락·미달이면 잠글 수 없다.
 
 `native/expanded`는 현재 후보 파일의 경로·해시다. `evidence` 항목에는 `id`, 파일 증거, `bindings: {source, native, baseline?}` 해시를 넣는다. `sourceReview`, `features`의 `clarity/fidelity`, `views.native/zoom/display` 관찰은 유효한 evidence ID를 인용해야 한다. 전체 이미지 항목 ID는 `$whole`이다.
 
-보이는 눈은 `eyeReview.flatColors/shape/reflection`, 1도트 선은 `outline` 특징의 `boundary.continuity/thickness/staircase/colorSeparation`을 각각 검수한다. `findings`에서 결함이 `RESOLVED`이면 새 `verification`이 필요하다. `OPEN` 또는 미검증은 납품 차단 사유다.
+보이는 눈은 `eyeReview.flatColors/shape/reflection`, 1도트 선은 `outline` 특징의 `boundary.continuity/thickness/staircase/colorSeparation`을 각각 검수한다. `findings`에서 결함이 `RESOLVED`이면 새 `verification`이 필요하다. `OPEN` 또는 미검증은 잠금과 납품 차단 사유다. `lock` 이후 검수 파일도 변경할 수 없다. 저장 후 확인한 `draftPreservation`은 잠긴 격자 초안과 최종본의 동일성만 뜻하며 생성 원안의 두께 보존이나 시각 품질을 대신하지 않는다.
 
 테스트 파일의 합성 PASS 기록은 실제 이미지 검수에 복사하지 않는다. 기술 검사 결과와 원본 의미·형태에 대한 직접 관찰을 분리한다.

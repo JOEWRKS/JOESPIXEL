@@ -157,6 +157,10 @@ function checkDelivery(contractPath, reviewPath, PNG) {
   }
   // Review extraction/mapping first; converter diagnostics cannot certify their own input.
   observation(review.sourceReview, 'Source feature identification and mapping', 'shape');
+  // The generated design is not the raster draft. Both its conversion losses
+  // and the actual fixed-grid image must be reviewed before the raster is locked.
+  observation(review.gridDraft?.sourceComparison,'Generated design to grid draft changes','shape');
+  observation(review.gridDraft?.visual,'Actual fixed-grid draft appearance','shape');
   if(contract.eyePolicy.visibility==='visible')for(const key of ['flatColors','shape','reflection'])
     observation(review.eyeReview?.[key],'eyes/'+key,'shape');
   requireValue(Array.isArray(review.features), 'Feature reviews required (may be empty)');

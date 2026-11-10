@@ -1,6 +1,6 @@
 {
   "name": "joespixel",
-  "version": "2.23.2",
+  "version": "2.23.4",
   "private": true,
   "description": "JOEWRKS pixel-art skill and fixed-grid verification workflow",
   "engines": {

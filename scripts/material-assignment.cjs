@@ -40,16 +40,16 @@ function compile(PNG,source,palette,width,height,plan,policies){
   need(Array.isArray(i.regionIds)&&i.regionIds.every(id=>ids.has(id))&&(i.decision!=='assigned'||i.regionIds.length),'inventory has no executable assignment');
  }
  for(const id of ids)need(plan.inventory.some(i=>i.regionIds.includes(id)),'region missing from reviewed inventory');
- const owners=new Int16Array(sw*sh).fill(-1),exceptions=new Uint8Array(sw*sh),map=new PNG({width:sw,height:sh});
+ const owners=new Int16Array(sw*sh).fill(-1),exceptions=new Uint8Array(sw*sh),sourceExceptions=new Uint8Array(sw*sh),map=new PNG({width:sw,height:sh});
  // A feature owns every logical cell it touches. Protecting only part of a
  // source cell would still let area voting change the feature's boundary.
- for(const f of plan.protectedFeatures){const [x,y,w,h]=f.rect,touched=new Set();for(let yy=y;yy<y+h;yy++)for(let xx=x;xx<x+w;xx++)if(!f.sourcePolygon||inside(xx+.5,yy+.5,f.sourcePolygon))touched.add(Math.floor(yy/cell)*width+Math.floor(xx/cell));for(const p of touched)for(let yy=Math.floor(p/width)*cell;yy<(Math.floor(p/width)+1)*cell;yy++)for(let xx=p%width*cell;xx<(p%width+1)*cell;xx++)exceptions[yy*sw+xx]=1;}
+ for(const f of plan.protectedFeatures){const [x,y,w,h]=f.rect,touched=new Set();for(let yy=y;yy<y+h;yy++)for(let xx=x;xx<x+w;xx++)if(!f.sourcePolygon||inside(xx+.5,yy+.5,f.sourcePolygon)){sourceExceptions[yy*sw+xx]=1;touched.add(Math.floor(yy/cell)*width+Math.floor(xx/cell));}for(const p of touched)for(let yy=Math.floor(p/width)*cell;yy<(Math.floor(p/width)+1)*cell;yy++)for(let xx=p%width*cell;xx<(p%width+1)*cell;xx++)exceptions[yy*sw+xx]=1;}
  plan.regions.forEach((r,index)=>{
   const xs=r.polygon.map(p=>p[0]),ys=r.polygon.map(p=>p[1]);
   for(let y=Math.floor(Math.min(...ys));y<Math.ceil(Math.max(...ys));y++)for(let x=Math.floor(Math.min(...xs));x<Math.ceil(Math.max(...xs));x++)if(inside(x+.5,y+.5,r.polygon)){
    const p=y*sw+x;need(owners[p]<0,'overlapping material observations must be resolved before placement');owners[p]=index;
    for(const name of r.boundaryRoles){const role=(policies.outlinePolicy.boundaryObservations??policies.outlinePolicy.observedStrokes).roles.find(role=>role.name===name),[a,b,c,d]=role.rect;
-    if(x>=a&&x<a+c&&y>=b&&y<b+d&&require('./raster-source-ink-paths.cjs').matchesObservedInk([...source.data.subarray(p*4,p*4+3)],role))exceptions[p]=1;
+    if(x>=a&&x<a+c&&y>=b&&y<b+d&&require('./raster-source-ink-paths.cjs').matchesObservedInk([...source.data.subarray(p*4,p*4+3)],role)){exceptions[p]=1;sourceExceptions[p]=1;}
    }
   }
  });
@@ -60,14 +60,18 @@ function compile(PNG,source,palette,width,height,plan,policies){
   if(complete){const p=y*width+x;interior.set(p,owner);}
  }
  for(let p=0;p<owners.length;p++)map.data.set(exceptions[p]?[255,255,255,255]:owners[p]>=0?[53+(owners[p]*73)%170,137,190,255]:[65,65,65,255],p*4);
- return {plan,owners,exceptions,interior,map};
+ return {plan,owners,exceptions,sourceExceptions,interior,map};
 }
 function assignSource(PNG,source,segmented,palette,compiled){
  const {toLab}=require('./build-palette-native.cjs'),out=new PNG({width:source.width,height:source.height});segmented.data.copy(out.data);
  const choices=compiled.plan.regions.map(r=>r.colors.map(hex=>{const p=palette.find(p=>p.hex===hex);return {rgb:p.rgb,lab:toLab(p.rgb)};}));
  const cache=new Map();let assignedPixels=0;
  for(let p=0;p<compiled.owners.length;p++){
-  const role=compiled.owners[p];if(role<0||compiled.exceptions[p])continue;
+  // Protect the feature's exact source samples during color assignment. Its
+  // whole touched grid cell stays protected later through exceptions/interior.
+  // Expanding this source exclusion to a grid cell leaves adjacent face color
+  // unassigned and can turn a white clearance into background in the area vote.
+  const role=compiled.owners[p];if(role<0||compiled.sourceExceptions[p])continue;
   const raw=source.data.readUInt32BE(p*4),key=role+':'+raw;let rgb=cache.get(key);
   if(!rgb){const lab=toLab([...source.data.subarray(p*4,p*4+3)]);let best=Infinity;for(const c of choices[role]){const d=c.lab.reduce((s,v,i)=>s+(v-lab[i])**2,0);if(d<best){best=d;rgb=c.rgb;}}cache.set(key,rgb);}
   out.data.set([...rgb,255],p*4);assignedPixels++;

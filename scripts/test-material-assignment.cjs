@@ -14,7 +14,16 @@ const plan={version:1,sourcePixelsSha256:hash(source.data),paletteColors:palette
 const artifact=asset('plan.json',JSON.stringify(plan)),compiled=m.compile(PNG,source,palette,6,6,plan,policies),map=asset('map.png',PNG.sync.write(compiled.map));
 let passed=0;function test(name,fn){fn();passed++;console.log('PASS '+name);}
 test('gray source color cannot enter declared skin family',()=>{const r=b.buildNative(PNG,source,palette,6,6,'#FFF7E6','source-region-area',null,null,null,null,null,null,artifact);assert.equal(m.audit(r.image,compiled).violations,0);assert(compiled.interior.size>0);});
-test('unassigned source and protected feature pixels remain byte-identical',()=>{const a=m.assignSource(PNG,source,source,palette,compiled).image;for(let p=0;p<576;p++)if(compiled.owners[p]<0||compiled.exceptions[p])assert.equal(a.data.readUInt32BE(p*4),source.data.readUInt32BE(p*4));});
+test('unassigned source and exact protected feature pixels remain byte-identical',()=>{const a=m.assignSource(PNG,source,source,palette,compiled).image;for(let p=0;p<576;p++)if(compiled.owners[p]<0||compiled.sourceExceptions[p])assert.equal(a.data.readUInt32BE(p*4),source.data.readUInt32BE(p*4));});
+test('adjacent material in a feature-touched cell is still assigned',()=>{
+ const contaminated=new PNG({width:24,height:24});source.data.copy(contaminated.data);
+ const adjacent=4*24+4,feature=5*24+5;contaminated.data.set([255,247,230,255],adjacent*4);
+ const result=m.assignSource(PNG,source,contaminated,palette,compiled).image;
+ assert.equal(compiled.exceptions[adjacent],1);assert.equal(compiled.sourceExceptions[adjacent],0);
+ assert.equal(result.data.readUInt32BE(adjacent*4),0xf4d3b7ff);
+ assert.equal(result.data.readUInt32BE(feature*4),contaminated.data.readUInt32BE(feature*4));
+ assert.equal(compiled.interior.has(7),false);
+});
 test('partial source feature protects its whole grid cell',()=>{for(let y=4;y<8;y++)for(let x=4;x<8;x++)assert.equal(compiled.exceptions[y*24+x],1);});
 test('saved color contamination is detected',()=>{const im=b.buildNative(PNG,source,palette,6,6,'#FFF7E6','source-region-area',null,null,null,null,null,null,artifact).image;im.data.set([121,91,89,255],compiled.interior.keys().next().value*4);assert.equal(m.audit(im,compiled).violations,1);});
 test('changed source cannot reuse ownership map',()=>{const p=structuredClone(plan);p.sourcePixelsSha256='0'.repeat(64);assert.throws(()=>m.compile(PNG,source,palette,6,6,p,policies),/source pixels changed/);});

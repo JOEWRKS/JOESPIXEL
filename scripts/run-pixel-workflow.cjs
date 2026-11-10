@@ -68,7 +68,7 @@ function prepare(jobPath, outputDir, PNG) {
   need(!stats.offPalettePixels&&!stats.partialAlphaPixels&&!stats.transparentPixels&&exactBlocks(saved,big,contract.scale),'Saved candidate failed technical check');
   const contractPath=path.join(outputDir,'contract.json');write(contractPath,contract);
   const input=path.join(outputDir,'conversion.json');write(input,job);
-  const manifest={version:1,status:'AWAITING_REVIEW',contract:artifact(contractPath),conversion:artifact(input),
+  const manifest={version:2,status:'GRID_DRAFT_AWAITING_REVIEW',contract:artifact(contractPath),conversion:artifact(input),
     source:contract.source,palette:contract.palette,baseline,native,expanded,converters:converters(),stats,fit,
     materialReport:built.materialReport??null,structureReport:built.structureReport??null,sourceRegionReport:built.sourceRegionReport??null,shapeRasterReport:built.shapeRasterReport??null,eyePolicyReport:built.eyePolicyReport,formReport:built.formReport??null,outlineReport:built.outlineReport??null,
     savedEyeAudit:require('./eye-plane-policy.cjs').auditEyePolicy(PNG,source,saved,palette,contract.eyePolicy,require('./eye-plane-policy.cjs').affineEyeGrid(source,saved,fit)),manualOutputEdits:0};
@@ -76,13 +76,16 @@ function prepare(jobPath, outputDir, PNG) {
   const pending=()=>({status:'UNVERIFIED',observation:'Direct comparison of saved PNG against source required.',evidence:[]});
   write(path.join(outputDir,'review.pending.json'),{version:1,reviewer:'',contractSha256:manifest.contract.sha256,
     native,expanded,evidence:[],sourceReview:pending(),eyeReview:{flatColors:pending(),shape:pending(),reflection:pending()},features:[...contract.features.map(f=>f.id),'$whole'].map(id=>({id,clarity:pending(),fidelity:pending()})),
-    views:{native:pending(),zoom:pending(),display:pending()},findings:(contract.requiredFindings??[]).map(id=>({id,status:'UNVERIFIED',description:'Required finding needs verification.'}))});
+    views:{native:pending(),zoom:pending(),display:pending()},
+    gridDraft:{native,expanded,grid:{native:[contract.width,contract.height],cell:contract.scale,canvas:[contract.width*contract.scale,contract.height*contract.scale],origin:[0,0]},sourceComparison:pending(),visual:pending()},
+    findings:(contract.requiredFindings??[]).map(id=>({id,status:'UNVERIFIED',description:'Required finding needs verification.'}))});
   return manifest;
 }
-function finalize(runDir, reviewPath, PNG) {
+function lock(runDir, reviewPath, PNG) {
   const manifest=read(path.join(runDir,'run.json'));
-  const delivery=path.join(runDir,'delivery');
-  need(!fs.existsSync(delivery), 'Delivery already exists; revalidate it with verify, never overwrite');
+  need(manifest.version===2 && manifest.status==='GRID_DRAFT_AWAITING_REVIEW', 'Fresh grid-draft run required; legacy runs are audit-only');
+  const locked=path.join(runDir,'locked-draft');
+  need(!fs.existsSync(locked), 'Grid draft already locked; changed design requires a new run');
   for(const a of [manifest.contract,manifest.conversion,manifest.source,manifest.palette,manifest.baseline,manifest.native,manifest.expanded,...manifest.converters])checkArtifact(a);
   const contract=read(manifest.contract.path);sourceGate(contract, PNG);
   require('./stage-gates.cjs').assertExecution(contract.stageChecks,'fixed-asset-grid',{...contract,...read(manifest.conversion.path)});
@@ -91,45 +94,94 @@ function finalize(runDir, reviewPath, PNG) {
   const review=read(reviewPath);
   need(review.native?.path===manifest.native.path&&review.native?.sha256===manifest.native.sha256&&
     review.expanded?.path===manifest.expanded.path&&review.expanded?.sha256===manifest.expanded.sha256,'Review must reference this exact generated candidate');
+  const draft=review.gridDraft, grid={native:[contract.width,contract.height],cell:contract.scale,canvas:[contract.width*contract.scale,contract.height*contract.scale],origin:[0,0]};
+  need(draft && JSON.stringify(draft.native)===JSON.stringify(manifest.native) && JSON.stringify(draft.expanded)===JSON.stringify(manifest.expanded) &&
+    JSON.stringify(draft.grid)===JSON.stringify(grid), 'Grid-draft review must bind the actual native PNG, integer display and locked grid');
   const gate=checkDelivery(manifest.contract.path,reviewPath,PNG);
   const gatePath=path.join(runDir,'gate-'+hash(fs.readFileSync(reviewPath)).slice(0,16)+'.json');
   if(!fs.existsSync(gatePath))write(gatePath,gate);
   if(gate.status!=='READY_FOR_USER_REVIEW')return{status:gate.status,exported:false,gate:gatePath,issues:gate.issues};
-  // Re-run the locked conversion before export. Hand-painted candidate bytes cannot pass.
+  // Provenance replay happens BEFORE locking. After this boundary no renderer
+  // or source contour extraction is allowed in finalize/verify.
   const job=read(manifest.conversion.path), source=PNG.sync.read(fs.readFileSync(contract.source.path)), palette=parsePalette(read(contract.palette.path));
   const replay=buildNative(PNG,source,palette,contract.width,contract.height,job.background,job.sampling??'area-vote',null,null,job.structure??null,contract.eyePolicy,contract.formPolicy??null,contract.outlinePolicy??null,contract.materialPlan??null);
   const saved=PNG.sync.read(fs.readFileSync(manifest.native.path));
   need(replay.image.data.equals(saved.data),'Candidate differs from deterministic conversion replay');
-  fs.mkdirSync(delivery);
-  const nativePath=path.join(delivery,'native.png'), expandedPath=path.join(delivery,'display.png');
+  need(JSON.stringify(replay.outlineReport??null)===JSON.stringify(manifest.outlineReport),'Stored stroke provenance differs from the executed conversion');
+  fs.mkdirSync(locked);
+  const nativePath=path.join(locked,'native.png'), expandedPath=path.join(locked,'display.png');
   fs.copyFileSync(manifest.native.path,nativePath,fs.constants.COPYFILE_EXCL);
   fs.copyFileSync(manifest.expanded.path,expandedPath,fs.constants.COPYFILE_EXCL);
+  const lockPath=path.join(locked,'lock.json');
+  write(lockPath,{version:1,status:'LOCKED_GRID_DRAFT',run:artifact(path.join(runDir,'run.json')),review:artifact(reviewPath),gate:artifact(gatePath),
+    native:artifact(nativePath),expanded:artifact(expandedPath),grid,pixelSha256:hash(saved.data)});
+  readLockedDraft(runDir,PNG);
+  return{status:'LOCKED_GRID_DRAFT',locked:true,lock:lockPath,native:nativePath,expanded:expandedPath};
+}
+// Validate immutable provenance and the ACTUAL locked raster. This path must
+// remain free of buildNative/checkDelivery/outline allocation calls.
+function readLockedDraft(runDir,PNG) {
+  const lockPath=path.join(runDir,'locked-draft','lock.json');
+  need(fs.existsSync(lockPath),'Reviewed grid draft must be locked before export');
+  const locked=read(lockPath);
+  need(locked.version===1 && locked.status==='LOCKED_GRID_DRAFT','Invalid grid-draft lock');
+  for(const a of [locked.run,locked.review,locked.gate,locked.native,locked.expanded])checkArtifact(a);
+  need(path.resolve(locked.run.path)===path.resolve(runDir,'run.json'),'Grid lock belongs to another run');
+  const m=read(locked.run.path);
+  need(m.version===2 && m.status==='GRID_DRAFT_AWAITING_REVIEW','Fresh grid-draft run required');
+  for(const a of [m.contract,m.conversion,m.source,m.palette,m.baseline,m.native,m.expanded,...m.converters])checkArtifact(a);
+  need(JSON.stringify(m.converters)===JSON.stringify(converters()),'Conversion or gate code changed; create a new grid draft');
+  need(locked.native.sha256===m.native.sha256 && locked.expanded.sha256===m.expanded.sha256,'Locked draft differs from reviewed grid pixels');
+  const c=read(m.contract.path),review=read(locked.review.path),gate=read(locked.gate.path);
+  need(gate.status==='READY_FOR_USER_REVIEW' && gate.reviewSha256===locked.review.sha256 && gate.contractSha256===m.contract.sha256,'Grid lock has no matching passed review');
+  const grid={native:[c.width,c.height],cell:c.scale,canvas:[c.width*c.scale,c.height*c.scale],origin:[0,0]};
+  need(JSON.stringify(locked.grid)===JSON.stringify(grid) && JSON.stringify(review.gridDraft?.grid)===JSON.stringify(grid),'Locked grid changed');
+  need(review.native.sha256===m.native.sha256 && review.expanded.sha256===m.expanded.sha256,'Locked review belongs to other pixels');
+  const native=PNG.sync.read(fs.readFileSync(locked.native.path)),expanded=PNG.sync.read(fs.readFileSync(locked.expanded.path)),palette=parsePalette(read(m.palette.path)),stats=inspect(native,palette);
+  need(native.width===c.width && native.height===c.height && palette.length===c.paletteCount && !stats.offPalettePixels && !stats.partialAlphaPixels && !stats.transparentPixels && exactBlocks(native,expanded,c.scale),'Locked draft violates fixed grid or palette');
+  need(hash(native.data)===locked.pixelSha256,'Locked pixel array changed');
+  let strokeAudit=null;
+  if(c.outlinePolicy){
+    strokeAudit=require('./raster-owned-stroke-bands.cjs').auditRenderedStrokeBands(native,m.outlineReport);
+    require('./raster-owned-stroke-bands.cjs').requireRenderedStrokeAudit(strokeAudit);
+  }
+  return{locked,lockPath,manifest:m,contract:c,native,expanded,strokeAudit};
+}
+function finalize(runDir,reviewPath,PNG) {
+  const {locked,lockPath,native,expanded,strokeAudit}=readLockedDraft(runDir,PNG);
+  need(path.resolve(reviewPath)===path.resolve(locked.review.path) && artifact(reviewPath).sha256===locked.review.sha256,'Final export requires the locked grid review; changed review requires a new run');
+  const delivery=path.join(runDir,'delivery');
+  need(!fs.existsSync(delivery),'Delivery already exists; revalidate it with verify, never overwrite');
+  fs.mkdirSync(delivery);
+  const nativePath=path.join(delivery,'native.png'),expandedPath=path.join(delivery,'display.png');
+  fs.copyFileSync(locked.native.path,nativePath,fs.constants.COPYFILE_EXCL);
+  fs.copyFileSync(locked.expanded.path,expandedPath,fs.constants.COPYFILE_EXCL);
+  need(PNG.sync.read(fs.readFileSync(nativePath)).data.equals(native.data) && PNG.sync.read(fs.readFileSync(expandedPath)).data.equals(expanded.data),'Saved output differs from locked grid draft');
   const receipt={version:1,status:'READY_FOR_USER_REVIEW',userAcceptance:'NOT_ASSESSED',
-    run:artifact(path.join(runDir,'run.json')),review:artifact(reviewPath),gate:artifact(gatePath),
+    run:locked.run,review:locked.review,gate:locked.gate,gridLock:artifact(lockPath),
+    draftPreservation:{status:'PASS',changedNativePixels:0,changedDisplayPixels:0,mode:'byte-copy-only',strokeAudit},
     native:artifact(nativePath),expanded:artifact(expandedPath)};
   write(path.join(delivery,'receipt.json'),receipt);
   return{status:receipt.status,exported:true,receipt:path.join(delivery,'receipt.json'),native:nativePath,expanded:expandedPath};
 }
 function verify(runDir,PNG) {
   const receipt=read(path.join(runDir,'delivery','receipt.json'));
-  for(const a of [receipt.run,receipt.review,receipt.gate,receipt.native,receipt.expanded])checkArtifact(a);
-  const m=read(receipt.run.path);for(const a of [m.contract,m.conversion,m.source,m.palette,m.baseline,m.native,m.expanded,...m.converters])checkArtifact(a);
-  need(JSON.stringify(m.converters)===JSON.stringify(converters()),'Code changed; delivery needs a fresh run');
-  need(receipt.native.sha256===m.native.sha256&&receipt.expanded.sha256===m.expanded.sha256,'Delivery differs from reviewed candidate');
-  sourceGate(read(m.contract.path), PNG);
-  require('./stage-gates.cjs').assertExecution(read(m.contract.path).stageChecks,'fixed-asset-grid',{...read(m.contract.path),...read(m.conversion.path)});
-  const result=checkDelivery(m.contract.path,receipt.review.path,PNG);
-  need(result.status==='READY_FOR_USER_REVIEW','Delivery review no longer passes');
-  return{status:result.status,receiptValid:true,userAcceptance:'NOT_ASSESSED',native:receipt.native.path,expanded:receipt.expanded.path};
+  for(const a of [receipt.run,receipt.review,receipt.gate,receipt.gridLock,receipt.native,receipt.expanded])checkArtifact(a);
+  const {locked,lockPath,native,expanded,strokeAudit}=readLockedDraft(runDir,PNG);
+  need(path.resolve(receipt.gridLock.path)===path.resolve(lockPath),'Receipt references a different grid lock');
+  for(const k of ['run','review','gate','native','expanded'])need(receipt[k].sha256===locked[k].sha256,'Delivery differs from locked '+k);
+  need(PNG.sync.read(fs.readFileSync(receipt.native.path)).data.equals(native.data) && PNG.sync.read(fs.readFileSync(receipt.expanded.path)).data.equals(expanded.data),'Delivery raster differs from locked draft');
+  return{status:'READY_FOR_USER_REVIEW',receiptValid:true,userAcceptance:'NOT_ASSESSED',draftPreservation:{status:'PASS',changedNativePixels:0,changedDisplayPixels:0},strokeAudit,native:receipt.native.path,expanded:receipt.expanded.path};
 }
-module.exports={prepare,finalize,verify};
+module.exports={prepare,lock,finalize,verify};
 if(require.main===module){try{
   const {PNG}=require(require.resolve('pngjs',{paths:[__dirname,process.cwd()]}));
   const [mode,a,b]=process.argv.slice(2);let result;
   if(mode==='prepare'&&a&&b)result=prepare(path.resolve(a),path.resolve(b),PNG);
+  else if(mode==='lock'&&a&&b)result=lock(path.resolve(a),path.resolve(b),PNG);
   else if(mode==='finalize'&&a&&b)result=finalize(path.resolve(a),path.resolve(b),PNG);
   else if(mode==='verify'&&a&&!b)result=verify(path.resolve(a),PNG);
-  else throw new Error('Usage: run-pixel-workflow.cjs prepare job.json NEW_RUN_DIR | finalize RUN_DIR review.json | verify RUN_DIR');
+  else throw new Error('Usage: run-pixel-workflow.cjs prepare job.json NEW_RUN_DIR | lock RUN_DIR review.json | finalize RUN_DIR review.json | verify RUN_DIR');
   console.log(JSON.stringify(mode==='prepare'?{status:result.status,native:result.native.path,stats:result.stats}:result,null,2));
-  if(mode==='finalize'&&!result.exported)process.exitCode=1;
+  if((mode==='finalize'&&!result.exported)||(mode==='lock'&&!result.locked))process.exitCode=1;
 }catch(error){console.log(JSON.stringify({status:'BLOCKED',exported:false,error:error.message}));process.exitCode=2;}}

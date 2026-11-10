@@ -41,13 +41,31 @@ function prepared(f=fixture()) {
   for(let i=4;i<7;i++){f.ledger.stages[i].input=i===4?x.source:x.native;f.ledger.stages[i].output=x.native;f.ledger.stages[i].evidence=[x.source,x.native];}
   const observed=()=>({...pass(),evidence:['comparison']});
   f.review={version:1,reviewer:observation,contractSha256:x.contract.sha256,native:x.native,expanded:x.expanded,stageChecks:f.ledger,
+    gridDraft:{native:x.native,expanded:x.expanded,grid:{native:[f.c.width,f.c.height],cell:f.c.scale,canvas:[f.c.width*f.c.scale,f.c.height*f.c.scale],origin:[0,0]},sourceComparison:observed(),visual:observed()},
     evidence:[{id:'comparison',...x.expanded,bindings:{source:x.source.sha256,native:x.native.sha256}}],sourceReview:observed(),features:['marker','$whole'].map(id=>({id,clarity:observed(),fidelity:observed()})),views:{native:observed(),zoom:observed(),display:observed()},findings:[]};
   f.reviewPath=path.join(f.dir,'review.json');return f;
 }
-function finish(f){fs.writeFileSync(f.reviewPath,JSON.stringify(f.review));return workflow.finalize(f.run,f.reviewPath,PNG);}
+function lock(f){fs.writeFileSync(f.reviewPath,JSON.stringify(f.review));return workflow.lock(f.run,f.reviewPath,PNG);}
+function finish(f){const result=lock(f);return result.locked?workflow.finalize(f.run,f.reviewPath,PNG):result;}
 function test(name,fn){fn();passed++;console.log('PASS '+name);}
-test('prepare creates pending evidence, never a delivery',()=>{const f=prepared();assert(!fs.existsSync(path.join(f.run,'delivery')));const p=JSON.parse(fs.readFileSync(path.join(f.run,'review.pending.json')));assert.equal(p.views.native.status,'UNVERIFIED');assert.equal(workflow.finalize(f.run,path.join(f.run,'review.pending.json'),PNG).exported,false);});
-test('seven-stage replay exports exact saved bytes and verifies receipt',()=>{const f=prepared();assert.equal(finish(f).exported,true);assert.equal(workflow.verify(f.run,PNG).receiptValid,true);assert.deepEqual(fs.readFileSync(path.join(f.run,'delivery/native.png')),fs.readFileSync(f.manifest.native.path));});
+test('prepare creates unreviewed grid draft, never a lock or delivery',()=>{const f=prepared();assert(!fs.existsSync(path.join(f.run,'delivery')));const p=JSON.parse(fs.readFileSync(path.join(f.run,'review.pending.json')));assert.equal(p.gridDraft.visual.status,'UNVERIFIED');assert.equal(workflow.lock(f.run,path.join(f.run,'review.pending.json'),PNG).exported,false);assert(!fs.existsSync(path.join(f.run,'locked-draft')));assert.throws(()=>workflow.finalize(f.run,f.reviewPath,PNG),/must be locked/);});
+test('reviewed grid lock exports exact bytes and verifies unchanged pixels',()=>{const f=prepared();assert.equal(finish(f).exported,true);const v=workflow.verify(f.run,PNG);assert.equal(v.receiptValid,true);assert.equal(v.draftPreservation.changedNativePixels,0);for(const file of ['native.png','display.png'])assert.deepEqual(fs.readFileSync(path.join(f.run,'delivery',file)),fs.readFileSync(path.join(f.run,'locked-draft',file)));});
+test('missing grid-draft review cannot be replaced by generic PASS',()=>{const f=prepared();delete f.review.gridDraft;assert.throws(()=>finish(f),/Grid-draft review/);});
+test('unreviewed raw-to-grid changes block locking',()=>{const f=prepared();f.review.gridDraft.sourceComparison.status='UNVERIFIED';assert.equal(finish(f).exported,false);});
+test('different grid cannot be frozen under the same review',()=>{const f=prepared();f.review.gridDraft.grid.cell=2;assert.throws(()=>finish(f),/Grid-draft review/);});
+test('lock cannot be overwritten and final review cannot change',()=>{const f=prepared();assert(lock(f).locked);assert.throws(()=>workflow.lock(f.run,f.reviewPath,PNG),/already locked/);fs.appendFileSync(f.reviewPath,' ');assert.throws(()=>workflow.finalize(f.run,f.reviewPath,PNG),/Changed artifact/);});
+test('one changed locked pixel blocks export',()=>{const f=prepared();lock(f);const p=path.join(f.run,'locked-draft/native.png'),im=PNG.sync.read(fs.readFileSync(p));im.data.writeUInt32BE(0x222222ff,0);fs.writeFileSync(p,PNG.sync.write(im));assert.throws(()=>workflow.finalize(f.run,f.reviewPath,PNG),/Changed artifact/);assert(!fs.existsSync(path.join(f.run,'delivery')));});
+test('rehashed manual change cannot become an approved grid draft',()=>{
+ const f=prepared(),x=f.manifest,im=PNG.sync.read(fs.readFileSync(x.native.path));im.data.writeUInt32BE(0x222222ff,0);
+ for(const [a,png]of [[x.native,im],[x.expanded,b.enlarge(PNG,im,f.c.scale)]]){const bytes=PNG.sync.write(png);fs.writeFileSync(a.path,bytes);a.sha256=hash(bytes);}
+ fs.writeFileSync(path.join(f.run,'run.json'),JSON.stringify(x));f.review.evidence[0].sha256=x.expanded.sha256;f.review.evidence[0].bindings.native=x.native.sha256;
+ assert.throws(()=>finish(f),/Candidate differs from deterministic conversion replay/);assert(!fs.existsSync(path.join(f.run,'locked-draft')));
+});
+test('finalize and verify never invoke conversion after lock',()=>{
+ const f=prepared();lock(f);const original=b.buildNative,originalEnlarge=b.enlarge,gateModule=require('./check-delivery.cjs'),originalCheck=gateModule.checkDelivery,workflowPath=require.resolve('./run-pixel-workflow.cjs');
+ b.buildNative=()=>{throw Error('Forbidden post-lock conversion');};b.enlarge=()=>{throw Error('Forbidden post-lock resize');};gateModule.checkDelivery=()=>{throw Error('Forbidden post-lock source replay');};delete require.cache[workflowPath];
+ try{const copyOnly=require(workflowPath);assert(copyOnly.finalize(f.run,f.reviewPath,PNG).exported);assert(copyOnly.verify(f.run,PNG).receiptValid);}finally{b.buildNative=original;b.enlarge=originalEnlarge;gateModule.checkDelivery=originalCheck;delete require.cache[workflowPath];}
+});
 for(const status of ['FAIL','UNVERIFIED'])test(status+' feature cannot export',()=>{const f=prepared();f.review.features[0].fidelity.status=status;assert.equal(finish(f).exported,false);assert(!fs.existsSync(path.join(f.run,'delivery')));});
 test('missing feature review cannot export',()=>{const f=prepared();f.review.features.pop();assert.equal(finish(f).exported,false);});
 test('missing actual-size review cannot export',()=>{const f=prepared();delete f.review.views.display;assert.equal(finish(f).exported,false);});

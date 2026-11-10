@@ -2,7 +2,7 @@
 name: joewrks-pixel-art
 description: "Generate, edit and verify pixel artwork from the user's concept and references. Use for pixel characters, portraits, props, icons, environments and sprites requiring a fixed grid, palette, one-dot contours and direct saved-image review; not ordinary UI layout or general illustration."
 metadata:
-  version: "2.23.2"
+  version: "2.23.4"
 ---
 
 # JOEWRKS Pixel Art
@@ -25,11 +25,11 @@ metadata:
 
 1. 원본 분석·캐릭터화: 캔버스, 점유율, 고정 팔레트와 재질 역할, 필수/생략 형태, 선 정책을 확정한다.
 2. 픽셀 크기 선정: 실제 격자 후보에서 전체 1도트 경계와 인접 색면·이목구비·틈이 함께 살아나는지 비교한 뒤 하나의 격자를 잠근다.
-3. 픽셀 설계: 선택 격자에 맞는 초안을 만든다. 캐릭터화 전에 격자로 형태를 강제하지 않는다.
+3. 픽셀 설계 원안: 선택 격자에 넣을 형태를 설계한다. 생성 이미지의 선 폭을 실제 도트 규격으로 인정하지 않는다.
 4. 재질·경계 배정: 원본 관찰로 영역을 구분하고 눈/머리/피부 경계 충돌을 별도 확인한다. 실행 가능한 배정표와 구분 PNG를 대조한다.
-5. 격자 배치: `fixed-asset-grid/source-region-area`로 면과 선을 함께 배치한다. 외곽선은 `joint-source-band`와 `anchored-source-curve`를 사용한다.
-6. 손실 수정: 확인된 원인만 공용 코드/관찰 입력에서 수정하고 해당 단계 이후를 재실행한다.
-7. 저장본 검수: 원본·초안·기준본·최종 PNG를 전체/부위별/실제 크기/정수 확대에서 직접 비교한다.
+5. 격자 초안 작성: `fixed-asset-grid/source-region-area`로 면과 선을 함께 배치한다. 외곽선은 `joint-source-band`와 `anchored-source-curve`를 사용한다. 이 native PNG가 실제 도트 규격을 가진 초안이다.
+6. 손실 수정: 원안과 격자 초안을 직접 비교한다. 결함은 공용 코드/관찰 입력에서 수정하고 새 실행으로 재배치한다. 수치 통과만으로 초안을 확정하지 않는다.
+7. 초안 확정·저장 검수: 전체/부위/실제 크기/정수 확대 검수 후 격자 초안을 잠근다. 저장은 잠긴 PNG 복사만 허용하며 도트 배열·확대본의 변경 0을 확인한다.
 
 ## 변경할 수 없는 조건
 
@@ -44,7 +44,7 @@ metadata:
 
 이미지 생성·생성 편집은 현재 사용 가능한 이미지 도구와 실제 원본을 사용한다. 이 스킬의 코드만으로 원화를 생성하거나 의미 영역을 자동 인식할 수는 없다.
 
-정식 저장 경로는 `run-pixel-workflow.cjs prepare → finalize → verify`다. 미실행·누락 검사는 `UNVERIFIED`이며 0건/PASS로 바꾸지 않는다. 단계 기록, 배정표, 실제 선 검사, 직접 시각 검수 중 하나라도 미달이면 최초 손실 단계로 돌아간다. 저수준 함수의 출력은 제출 우회로가 아니다.
+정식 저장 경로는 `run-pixel-workflow.cjs prepare → lock → finalize → verify`다. `lock` 전 원안→격자 초안의 손실과 실제 선 폭을 검수한다. 잠금 후 선 재추출·재배치·크기 변경은 금지한다. 원안의 10px 선을 8px로 배치한 사실을 감추고 보존 성공으로 보고하지 않는다. 미실행·누락 검사는 `UNVERIFIED`이며 결함이 있으면 원인 단계로 돌아간다. 저수준 출력과 잠금 없는 과거 실행은 납품을 우회할 수 없다.
 
 기술 규격 통과, 시각 품질, 사용자 채택은 별개다. 변경 칸 수나 코드 시험으로 형태 복원을 주장하지 않는다. 확인된 부분 개선만 부분 개선으로 보고하고, 필수 결함이 남은 결과를 완료본으로 제출하지 않는다. 실제 도구·권한·입력 제약이 있으면 미완료 범위를 정확히 밝힌다.
 
