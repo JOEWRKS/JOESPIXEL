@@ -75,9 +75,9 @@ function checkDelivery(contractPath, reviewPath, PNG) {
 
   eyeGrid??=eyeRules.affineEyeGrid(source,native,{fitWidth:source.width*fit.scaleX,fitHeight:source.height*fit.scaleY,offsetX:fit.offsetX,offsetY:fit.offsetY});
   const eyeSource=source;
-  const savedEyeAudit=eyeRules.auditEyePolicy(PNG,eyeSource,native,palette,contract.eyePolicy,eyeGrid);
-  if(savedEyeAudit.status==='FAIL')add('technical','FAIL','Saved eyes violate flat-role policy: '+savedEyeAudit.nonconformingCells);
   const material=contract.materialPlan?require('./material-assignment.cjs').compile(PNG,source,palette,native.width,native.height,require('./material-assignment.cjs').readPlan(contract.materialPlan),{eyePolicy:contract.eyePolicy,formPolicy:contract.formPolicy??null,outlinePolicy:contract.outlinePolicy??null}):null;
+  const savedEyeAudit=eyeRules.auditEyePolicy(PNG,eyeSource,native,palette,contract.eyePolicy,eyeGrid,material);
+  if(savedEyeAudit.status==='FAIL')add('technical','FAIL','Saved eyes violate flat-role policy: '+savedEyeAudit.nonconformingCells);
   if(material){const audit=require('./material-assignment.cjs').audit(native,material);if(audit.violations)add('shape','FAIL','Stored material assignment violated: '+audit.violations);}
   if(contract.outlinePolicy){
     try{
@@ -103,7 +103,7 @@ function checkDelivery(contractPath, reviewPath, PNG) {
     }catch(error){add('shape','FAIL','Stored one-pixel outline: '+error.message);}
   }
   if(contract.formPolicy){
-    const forms=require('./raster-observed-details.cjs').allocateRequiredForms(PNG,source,native,eyeGrid,palette,contract.formPolicy);
+    const forms=require('./raster-observed-details.cjs').allocateRequiredForms(PNG,source,native,eyeGrid,palette,contract.formPolicy,material);
     if(forms.report.unresolved.length)add('shape','FAIL','Required forms cannot fit: '+forms.report.unresolved.join(', '));
     if(!forms.image.data.equals(native.data))add('shape','FAIL','Stored pixels do not retain the declared required forms and simplification');
   }

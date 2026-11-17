@@ -35,4 +35,44 @@ test('an already-incomplete plan cannot certify an open exterior',()=>{const x=f
 test('source/exterior evidence missing is unverified',()=>{const a=audit(im,{...report,exteriorClosureRequired:true,background:'#FFFFFF'});assert.equal(a.status,'UNVERIFIED');});
 test('canvas-edge crop is not an open exterior, but an internal break still is',()=>{const x=fresh(),cells=[];for(let y=2;y<8;y++)for(let a=2;a<=5;a++){const p=y*8+a;if(a===2||a===5||y===2){x.data.writeUInt32BE(ink,p*4);cells.push(p);}else x.data.writeUInt32BE(skin,p*4);}const make=c=>({version:1,method:'joint-source-band',colors:['#432443'],sourceBand:[...Array(64).keys()],pathCells:c,expectedColors:c.map(p=>[p,ink]),expectedFillColors:[],protectedColors:[],filledMaterialCells:[],sourcePathCount:1,unresolved:[],exteriorClosureRequired:true,background:'#FFFFFF',sourceInkEvidence:{executed:true}});requireAudit(audit(x,make(cells)));const gap=34;x.data.writeUInt32BE(white,gap*4);assert.equal(audit(x,make(cells.filter(p=>p!==gap))).status,'FAIL');});
 test('declared solid material closes a mixed line/material silhouette',()=>{const x=fresh(),cells=[];for(let y=2;y<=5;y++)for(let a=2;a<=5;a++){const p=y*8+a;if(a===2){x.data.writeUInt32BE(0x191c29ff,p*4);}else if(a===5||y===2||y===5){x.data.writeUInt32BE(ink,p*4);cells.push(p);}else x.data.writeUInt32BE(skin,p*4);}const r={version:1,method:'joint-source-band',colors:['#432443'],solidExteriorColors:['#191C29'],sourceBand:[...Array(64).keys()],pathCells:cells,expectedColors:cells.map(p=>[p,ink]),expectedFillColors:[],protectedColors:[],filledMaterialCells:[],sourcePathCount:1,unresolved:[],exteriorClosureRequired:true,background:'#FFFFFF',sourceInkEvidence:{executed:true}};requireAudit(audit(x,r));assert.equal(audit(x,{...r,solidExteriorColors:[]}).status,'FAIL');});
+test('reviewed background ownership overrides raw color distance without erasing assigned material',()=>{
+ const palette=parsePalette({colors:['#FFFFFF','#432443','#FFCC99']}),source=new PNG({width:32,height:32}),labels=new PNG({width:32,height:32}),base=new PNG({width:8,height:8});
+ for(let p=0;p<1024;p++){source.data.writeUInt32BE(0xe8ddd1ff,p*4);labels.data.writeUInt32BE(white,p*4);}base.data.fill(255);
+ for(let y=12;y<16;y++)for(let x=4;x<28;x++){source.data.writeUInt32BE(ink,(y*32+x)*4);labels.data.writeUInt32BE(ink,(y*32+x)*4);}
+ const owners=new Int16Array(1024).fill(-1);owners[0]=0;owners[1]=1;
+ const material={owners,interior:new Map(),plan:{regions:[{material:'background'},{material:'skin'}]}};
+ const policy={layout:'joint-source-band',width:1,background:'#FFFFFF',backgroundTolerance:10,sourceStrokeColors:['#432443'],sourceInkRoles:[{name:'ink',color:'#432443',kind:'stroke',observation:'Observed fixture stroke'}]};
+ let observed;require('./raster-owned-stroke-bands.cjs').joint(PNG,source,base,palette,policy,material,{mask:new Uint8Array(1024),cells:new Set()},labels,e=>{if(e.stage.endsWith('source-ownership'))observed=PNG.sync.read(e.png);});
+ assert.equal(observed.data.readUInt32BE(0),0xffffffff);assert.equal(observed.data.readUInt32BE(4),0x4466aaff);assert.equal(observed.data.readUInt32BE(8),0x4466aaff);
+});
+for(const variant of ['background-fringe','protected-feature'])test(variant+' cannot seed another region with background or raw feature RGB',()=>{
+ const W=40,N=10,palette=parsePalette({colors:['#FFFFFF','#432443','#FFCC99']}),source=new PNG({width:W,height:W}),labels=new PNG({width:W,height:W});
+ for(let y=0;y<W;y++)for(let x=0;x<W;x++){const c=x<4||y<4||x>=36||y>=36?white:x<12||y<12||x>=28||y>=28?ink:skin;source.data.writeUInt32BE(c,(y*W+x)*4);labels.data.writeUInt32BE(c,(y*W+x)*4);}
+ // Real enclosed negative space remains background, unlike a mislabeled
+ // foreground fringe. Both cases use the same palette and source geometry.
+ for(let y=20;y<24;y++)for(let x=20;x<24;x++){source.data.writeUInt32BE(white,(y*W+x)*4);labels.data.writeUInt32BE(white,(y*W+x)*4);}
+ const mask=new Uint8Array(W*W),cells=new Set();for(let y=12;y<15;y++)for(let x=12;x<15;x++){labels.data.writeUInt32BE(variant==='background-fringe'?white:0x734c55ff,(y*W+x)*4);if(variant==='protected-feature'){mask[y*W+x]=1;cells.add(3*N+3);}}
+ const b=require('./build-palette-native.cjs'),base=b.buildNative(PNG,source,palette,N,N,'#FFFFFF','area-vote').image;
+ const policy={layout:'joint-source-band',width:1,background:'#FFFFFF',backgroundTolerance:10,sourceStrokeColors:['#432443'],sourceInkRoles:[{name:'fixture contour',color:'#432443',kind:'stroke',observation:'Closed source border around skin and a real enclosed gap'}]};
+ const result=require('./raster-owned-stroke-bands.cjs').joint(PNG,source,base,palette,policy,null,{mask,cells},labels);
+ assert.equal(result.image.data.readUInt32BE((2*N+3)*4),skin);
+ assert.equal(result.image.data.readUInt32BE((5*N+5)*4),white);
+ for(const p of cells)assert.equal(result.image.data.readUInt32BE(p*4),base.data.readUInt32BE(p*4));
+ assert.equal(b.inspect(result.image,palette).offPalettePixels,0);
+});
+test('invalid composed curve is rejected in favor of an independently audited source layout',()=>{
+ const b=require('./build-palette-native.cjs'),flow=require('./source-curve-flow.cjs'),joint=require('./raster-owned-stroke-bands.cjs').joint;
+ const source=new PNG({width:64,height:64}),labels=new PNG({width:64,height:64});
+ for(let y=0;y<64;y++)for(let x=0;x<64;x++){const color=x>=12&&x<52&&y>=12&&y<52?(x<16||x>=48||y<16||y>=48?ink:skin):white;source.data.writeUInt32BE(color,(y*64+x)*4);labels.data.writeUInt32BE(color,(y*64+x)*4);}
+ const palette=parsePalette({colors:['#FFFFFF','#432443','#FFCC99']}),base=b.buildNative(PNG,source,palette,16,16,'#FFFFFF','area-vote').image;
+ const policy={layout:'joint-source-band',width:1,background:'#FFFFFF',backgroundTolerance:10,sourceStrokeColors:['#432443'],sourceInkRoles:[{name:'contour',color:'#432443',kind:'stroke',observation:'Observed closed fixture contour'}]},features={mask:new Uint8Array(4096),cells:new Set()};
+ const reference=joint(PNG,source,base,palette,policy,null,features,labels),original=flow.layoutCurveFlow;
+ try{
+  flow.layoutCurveFlow=()=>({paths:[],report:{executed:true,accepted:1,records:[{accepted:true,before:2,after:1}]}});
+  const result=joint(PNG,source,base,palette,{...policy,curveFlow:{version:1,method:'anchored-source-curve'}},null,features,labels);
+  assert(result.image.data.equals(reference.image.data));assert.equal(result.report.curveFlow.accepted,0);assert.equal(result.report.curveFlow.attemptedAccepted,1);
+  assert.equal(result.report.curveFlow.selection,'source-layout-after-rejected-curve');requireAudit(audit(result.image,result.report));
+  const broken=clone(result.image),p=result.report.pathCells[0];broken.data.writeUInt32BE(white,p*4);assert.equal(audit(broken,result.report).status,'FAIL');
+ }finally{flow.layoutCurveFlow=original;}
+});
 console.log(JSON.stringify({status:'PASS',checks}));

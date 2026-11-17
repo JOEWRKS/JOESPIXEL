@@ -1,0 +1,11 @@
+'use strict';
+const assert=require('node:assert/strict'),fs=require('node:fs'),os=require('node:os'),path=require('node:path'),{PNG}=require('pngjs');
+const b=require('./build-palette-native.cjs'),{createTrace,snapshot}=require('./conversion-trace.cjs');
+const source=new PNG({width:24,height:24});source.data.fill(255);for(let y=5;y<18;y++)for(let x=6;x<19;x++)source.data.writeUInt32BE(0x432443ff,(y*24+x)*4);
+const palette=b.parsePalette({colors:['#FFFFFF','#432443']}),args=[PNG,source,palette,6,6,'#FFFFFF','source-region-area',null,null,null,null,null,null,null];
+const expected=b.buildNative(...args),before=Buffer.from(source.data),events=[];
+const traced=b.buildNative(...args,e=>{events.push(e.stage);e.png.fill(0);e.details.fake='observer mutation';});
+assert(expected.image.data.equals(traced.image.data));assert(source.data.equals(before));assert(events.includes('area-placement'));assert(events.includes('source'));
+const dir=fs.mkdtempSync(path.join(os.tmpdir(),'pixel-trace-')),trace=createTrace(dir,{test:true});snapshot(PNG,trace.record,'source',source,{observed:'test'});trace.finish('CONVERSION_FAILED','deliberate fixture failure');const record=JSON.parse(fs.readFileSync(path.join(dir,'trace.json')));
+assert.equal(record.status,'CONVERSION_FAILED');assert.equal(record.stages.length,1);assert(PNG.sync.read(fs.readFileSync(path.join(dir,record.stages[0].file))).data.equals(source.data));assert.throws(()=>trace.finish('PASS'),/EEXIST/);
+console.log('PASS trace isolation, identical rendering, saved failure evidence and no overwrite');

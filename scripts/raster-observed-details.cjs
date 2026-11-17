@@ -244,9 +244,17 @@ function sourceCellOwnership(PNG,source,grid,palette,background){
  }
  return out;
 }
-function allocateRequiredForms(PNG,source,baseline,grid,palette,policy){
+function sourceStrokeClassifier(feature){
+ const valid=s=>Array.isArray(s)&&s.length>0&&s.every(c=>Array.isArray(c)&&c.length===3&&c.every(v=>Number.isFinite(v)&&v>=0&&v<=255));
+ if(!valid(feature.samples)||!valid(feature.contextSamples))throw Error('Form policy: source stroke and context colour observations required');
+ const {toLab}=require('./build-palette-native.cjs'),dist=(a,b)=>a.reduce((sum,v,i)=>sum+(v-b[i])**2,0);
+ const ink=feature.samples.map(toLab),context=feature.contextSamples.map(toLab);
+ return rgb=>{const lab=toLab(rgb);return Math.min(...ink.map(c=>dist(c,lab)))<Math.min(...context.map(c=>dist(c,lab)));};
+}
+function allocateRequiredForms(PNG,source,baseline,grid,palette,policy,material=null){
  const fail=m=>{throw Error('Form policy: '+m);};
  if(policy?.version!==1||!Array.isArray(policy.features)||!policy.features.length)fail('observed features required');
+ if(policy.placement!==undefined&&policy.placement!=='source-path')fail('unknown stroke placement');
  const {toLab}=require('./build-palette-native.cjs');
  // Reuse the established grid/palette validation even for exterior-only jobs.
  rasterObservedDetails(PNG,source,baseline,grid,[],palette);
@@ -256,7 +264,9 @@ function allocateRequiredForms(PNG,source,baseline,grid,palette,policy){
  const assign=(p,color,name)=>{if(reserved.has(p)&&reserved.get(p).color!==color)fail('required forms compete for a cell');reserved.set(p,{color,name});image.data.writeUInt32BE(color,p*4);};
  const dist=(a,b)=>a.reduce((s,v,i)=>s+(v-b[i])**2,0);
  for(const f of [...policy.features].sort((a,b)=>(a.priority==='required'?0:1)-(b.priority==='required'?0:1))){
-  if(Object.keys(f).some(k=>!['name','kind','priority','observation','sourceRegion','color','samples','contextSamples','background'].includes(k)))fail('output coordinates and unknown fields forbidden');
+  if(Object.keys(f).some(k=>!['name','kind','priority','observation','sourceRegion','color','samples','contextSamples','background','curve'].includes(k)))fail('output coordinates and unknown fields forbidden');
+  if(f.curve&&(f.kind!=='stroke'||policy.placement!=='source-path'))fail('curve observations require source-path stroke placement');
+  if(policy.placement==='source-path'&&f.kind==='stroke'&&f.priority==='required'&&!f.curve)fail('required source-path stroke needs observed curve landmarks');
   if(!f.name||!f.observation||!['required','optional'].includes(f.priority)||!['stroke','exterior'].includes(f.kind)||!allowed.has(f.color))fail('invalid observed role');
   const color=allowed.get(f.color);
   if(f.kind==='exterior'){
@@ -281,12 +291,10 @@ function allocateRequiredForms(PNG,source,baseline,grid,palette,policy){
   }
   const [rx,ry,rw,rh]=f.sourceRegion??[];
   if(![rx,ry,rw,rh].every(Number.isSafeInteger)||rx<0||ry<0||rw<1||rh<1||rx+rw>source.width||ry+rh>source.height)fail('source search region required');
-  const valid=s=>Array.isArray(s)&&s.length>0&&s.every(c=>Array.isArray(c)&&c.length===3&&c.every(v=>Number.isFinite(v)&&v>=0&&v<=255));
-  if(!valid(f.samples)||!valid(f.contextSamples))fail('source stroke and context colour observations required');
-  const ink=f.samples.map(toLab),context=f.contextSamples.map(toLab),mask=new Set();
+  const isStroke=sourceStrokeClassifier(f),context=f.contextSamples.map(toLab),mask=new Set();
   for(let y=ry;y<ry+rh;y++)for(let x=rx;x<rx+rw;x++){
-   const p=y*source.width+x,lab=toLab([...source.data.subarray(p*4,p*4+3)]);
-   if(Math.min(...ink.map(c=>dist(c,lab)))<Math.min(...context.map(c=>dist(c,lab))))mask.add(p);
+   const p=y*source.width+x;
+   if(isStroke([...source.data.subarray(p*4,p*4+3)]))mask.add(p);
   }
   const seen=new Set(),parts=[];
   for(const p of mask)if(!seen.has(p)){
@@ -304,13 +312,43 @@ function allocateRequiredForms(PNG,source,baseline,grid,palette,policy){
   }
   const cellX=grid.x[0][1]-grid.x[0][0],cellY=grid.y[0][1]-grid.y[0][0];
   const span=[(bounds[2]-bounds[0])/cellX,(bounds[3]-bounds[1])/cellY];
-  const contextColor=palette.filter(p=>p.hex!==f.color).reduce((a,b)=>Math.min(...context.map(c=>dist(toLab(b.rgb),c)))<Math.min(...context.map(c=>dist(toLab(a.rgb),c)))?b:a);
+  const contextOwners=new Set();let unassignedContext=false;
+  if(material)for(let y=ry;y<ry+rh;y++)for(let x=rx;x<rx+rw;x++){const p=y*source.width+x;if(mask.has(p))continue;const owner=material.owners[p];if(owner<0)unassignedContext=true;else contextOwners.add(owner);}
+  const contexts=[...contextOwners].map(owner=>material.plan.regions[owner]);
+  const contextKey=r=>JSON.stringify([r.material,[...r.colors].sort(),r.baseColor]);
+  const contextAllowed=!unassignedContext&&contexts.length&&contexts.every(r=>contextKey(r)===contextKey(contexts[0]))?new Set(contexts[0].colors):null;
+  const contextPool=palette.filter(p=>p.hex!==f.color&&(!contextAllowed||contextAllowed.has(p.hex)));
+  if(!contextPool.length)fail('observed stroke context has no allowed material color');
+  const contextColor=contextPool.reduce((a,b)=>Math.min(...context.map(c=>dist(toLab(b.rgb),c)))<Math.min(...context.map(c=>dist(toLab(a.rgb),c)))?b:a);
   const bg=allowed.get(contextColor.hex);
   // Assign the simplified component AND its vacated coverage together. Leaving
   // the old area-vote shades underneath would make a thin line visually thick.
   // Only cells actually touched by observed component pigment are eligible.
   const footprint=new Set();for(const p of main){const x=p%source.width,y=Math.floor(p/source.width),gx=grid.x.findIndex(v=>x>=v[0]&&x<v[1]),gy=grid.y.findIndex(v=>y>=v[0]&&y<v[1]);if(gx>=0&&gy>=0)footprint.add(gy*baseline.width+gx);}
   const clearVacated=keep=>{let count=0;for(const p of footprint)if(!keep.has(p)&&!reserved.has(p)){image.data.writeUInt32BE(bg,p*4);count++;}return count;};
+  if(policy.placement==='source-path'){
+   try{
+    const planner=require('./raster-source-ink-paths.cjs'),plan=f.curve?planner.planObservedCurve(new Set(main),source.width,source.height,grid,baseline.width,baseline.height,f.curve):planner.planSourceStroke(new Set(main),source.width,source.height,grid,baseline.width,baseline.height);
+    if([...plan.cells].some(p=>reserved.has(p)&&reserved.get(p).color!==color))fail('required stroke owners compete for one cell');
+    const fills=new Map(),component=new Set(main),nonInk=contextPool,contextPalette=[...new Map(context.map(lab=>{const color=nonInk.reduce((a,b)=>dist(toLab(a.rgb),lab)<=dist(toLab(b.rgb),lab)?a:b);return [color.hex,color];})).values()];
+    const contextAt=q=>{const lab=toLab([...source.data.subarray(q*4,q*4+3)]);return contextPalette.reduce((a,b)=>dist(toLab(a.rgb),lab)<=dist(toLab(b.rgb),lab)?a:b);};
+    // Resolve each vacated cell from its own source side. A constant global
+    // context color would erase a real skin/shadow boundary underneath a line.
+    for(const p of footprint)if(!plan.cells.has(p)&&!reserved.has(p)){
+     const x=p%baseline.width,y=Math.floor(p/baseline.width),[l,r]=grid.x[x],[t,b]=grid.y[y],votes=new Map();
+     for(let sy=Math.max(ry,Math.floor(t));sy<Math.min(ry+rh,b);sy++)for(let sx=Math.max(rx,Math.floor(l));sx<Math.min(rx+rw,r);sx++){const q=sy*source.width+sx;if(component.has(q))continue;const c=contextAt(q).hex;votes.set(c,(votes.get(c)||0)+1);}
+     if(votes.size)fills.set(p,allowed.get([...votes].sort((a,b)=>b[1]-a[1])[0][0]));
+     else{
+      const anchor=[...plan.cells].reduce((a,b)=>Math.hypot(x-a%baseline.width,y-Math.floor(a/baseline.width))<=Math.hypot(x-b%baseline.width,y-Math.floor(b/baseline.width))?a:b),dx=x-anchor%baseline.width,dy=y-Math.floor(anchor/baseline.width),len=Math.hypot(dx,dy);
+      for(let d=0;d<=Math.hypot(rw,rh);d+=.5){const sx=Math.floor((l+r)/2+dx/len*d),sy=Math.floor((t+b)/2+dy/len*d);if(sx<rx||sx>=rx+rw||sy<ry||sy>=ry+rh)break;const q=sy*source.width+sx;if(!component.has(q)){fills.set(p,allowed.get(contextAt(q).hex));break;}}
+     }
+     if(!fills.has(p))fail('stroke has no source-supported adjacent fill');
+    }
+    for(const[p,c]of fills)image.data.writeUInt32BE(c,p*4);const cleared=fills.size;for(const p of plan.cells)assign(p,color,f.name);
+    reports.push({name:f.name,priority:f.priority,action:'source-path-and-adjacent-fill',span,cells:plan.cells.size,cleared,sourceFootprint:[...plan.footprint],curve:plan.curve??null,sourceTopology:plan.sourceTopology,nativeTopology:plan.nativeTopology});
+   }catch(error){if(f.priority==='required')unresolved.push(f.name);reports.push({name:f.name,action:'joint-geometry-unresolved',reason:error.message});}
+   continue;
+  }
   if(f.priority==='optional'&&Math.min(...span)<1){const cleared=clearVacated(new Set());reports.push({name:f.name,priority:f.priority,action:'omitted-below-one-cell',span,cleared});continue;}
   // Existing profile raster handles source-supported steps and rejects a jump
   // larger than one row. It does not force a smile or append endpoint pixels.
@@ -327,4 +365,4 @@ function allocateRequiredForms(PNG,source,baseline,grid,palette,policy){
  }
  return {image,report:{method:'explicit-feature-capacity',features:reports,unresolved,reservedCells:reserved.size,status:unresolved.length?'UNRESOLVED_REQUIRED_FORMS':'AWAITING_SAVED_VISUAL_REVIEW',limitation:'Observed source roles and outline decision are required. A fitted path is not a visual or expression pass.'}};
 }
-module.exports={rasterObservedDetails,rasterFlatColorRegions,allocateRequiredForms};
+module.exports={rasterObservedDetails,rasterFlatColorRegions,allocateRequiredForms,sourceStrokeClassifier};

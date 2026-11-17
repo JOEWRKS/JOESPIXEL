@@ -4,6 +4,12 @@
 
 ## 실행 명령
 
+새 눈 입력은 `placement: "source-partitions"`, `geometryPolicy: "source-stroke-fill"`을 함께 지정한다. 각 역할의 `geometry`는 `stroke`(선), `fill`(동공·홍채 등 면), `feature`(반사광 등) 중 하나다. 선만 `width: 1`을 요구한다. `closed: true`는 실제로 하나의 내부를 둘러싼 테두리에만 사용하며, 옆 무늬나 눈썹을 같은 테두리로 묶지 않는다. 같은 어두운 RGB라도 동공 면과 테두리는 공간 관찰로 구분한다. 입력 누락·선 연결/틈 손실·필수 면 소실은 차단한다.
+
+입 같은 내부 선은 `formPolicy.placement: "source-path"`로 원본 경로와 인접 면을 배치한다. 눈과 내부 선이 같은 격자 칸을 요구하면 차단한다. 원본 영역·색 역할 관찰은 여전히 필요하며, 이름으로 캐릭터를 판별하거나 목적지 도트를 지정하지 않는다. 과거 입력의 저수준 재현은 유지하지만 새 제작의 필수 검사를 우회하지 못한다.
+
+`source-path`의 필수 열린 선에는 `feature.curve`가 필요하다: `{version:1, axis:"y", observation:"원본 형태 관찰", landmarks:[...]}`. `axis`는 굽힘 높이를 비교할 원본 축(`x` 또는 `y`)이다. 각 landmark는 `{name, kind, sourceRegion:[x,y,w,h]}`이며, 처음/마지막은 `endpoint`, 중간은 해당 축의 `min`(봉우리) 또는 `max`(굽힘)다. 창은 원본의 의미 있는 지점을 둘러싸며 목적지 도트나 강제 출력 폭을 입력하지 않는다. 바닥 폭은 원본에서 계산한다. 양끝은 관찰된 선 끝까지 유지하고, 중간 굽힘 후보는 원본 잉크 안에서 한 논리 칸 거리 이내로 공동 선택한다. 보고서의 선택 위치·원본 대비 이동·곡선 순서를 직접 검수한다. 닫힌 눈 테두리·동공 면·입 내부 색면을 이 열린 선 방식에 넣지 않는다. 기존 필수 `source-path` 입력도 새 실행 전 이 관찰을 추가해야 하며, 누락 시 자동 보호로 대체하지 않는다.
+
 에이전트가 관찰 입력과 단계 증거를 준비한 뒤 스킬 폴더에서 실행한다.
 
 ```text
@@ -62,6 +68,14 @@ node scripts/run-pixel-workflow.cjs verify /absolute/path/new-run
 
 보이는 경우 `eyes`의 각 항목에 `name`, 원본 검색 `rect: [x,y,w,h]`, 실제 소유 `sourcePolygon`, `roles`, 반사 정책 `reflection: if-room|off`를 기록한다. 역할에는 `name`, 대표 `color`, 해당 역할의 팔레트 `colors`, 원본 RGB `samples`를 넣는다. 반사 역할 이름은 실행 모듈이 인식하는 `light`를 쓴다. 검색 사각형 전체를 눈으로 보호하지 않는다. 같은 다각형을 재질 계획의 보호 특징에도 전달한다.
 
+새 제작의 보이는 눈은 `placement: source-partitions`가 필수다. 과거 색 정리 방식은 기존 입력 재현용이며 새 제작 입구에서 차단한다. 역할 분할은 색 배정용이며 공간 분리 명령이 아니다. 원본에서 가까운 위쪽 획과 눈 테두리 사이에 최소 흰 칸 수를 일괄 요구하지 않는다. 관찰에는 원본의 접촉/근접/분리 관계를 명시하고, 설계 원안이 이를 바꾸면 배정 전에 반려한다.
+
+- 각 눈의 `partitions`에 `{name, sourcePolygon, roles: [역할 이름], observation}`을 기록한다. 홍채 영역은 어두운 동공·홍채 음영·반사를 포함하되 실제 눈꺼풀을 침범하지 않는다. 분할 밖에 적용할 역할 이름은 `baseRoles`로 지정한다. 실제 소스 픽셀에서 분할이 겹치면 실행을 차단한다.
+- 역할의 `family`는 먼저 칸을 배정받을 동일한 형태다. 홍채의 기본색·음영·동공·반사는 같은 홍채 family로 묶고, 눈꺼풀·흰자·피부와 구분한다. family가 차지할 칸을 정한 후 그 안의 역할색을 선택한다. 전체 면적 할당량으로 색을 다른 위치에 이동하지 않는다.
+- `samples`는 원본에서 관찰한 RGB다. 출력 팔레트의 색을 원본 표본으로 대신하거나, 같은 어두운 색이라는 이유로 눈꺼풀과 동공을 합치지 않는다. 공간 분할이 구별하므로 역할 간 같은 출력색은 허용한다. 필수 역할은 `required: true`, 반사 때문에 지워서는 안 되는 동공 등은 `protect: true`로 지정한다. 선택적 역할만 `required: false`로 둔다.
+- `applyEyePolicy`가 반환한 `sourceRoleMap`을 실제 원안과 먼저 대조한다. 위쪽 속눈썹까지 눈 소유 영역에 들어가는지, 홍채 경계·동공·반사가 올바른 역할인지 확인한다. 원본 관찰 경로이며 목적지 도트 지정이나 자동 해부학 인식이 아니다. 단순한 점눈도 관찰된 하나의 형태로 명시하며 홍채를 새로 만들지 않는다.
+- 중앙 동공과 홍채 가장자리가 같은 어두운 색이면 RGB 표본만으로 구별하지 않는다. 관찰된 중앙 영역과 주변 홍채를 겹치지 않는 소스 `partitions`로 나누고, 동공 역할은 실제 중앙 영역에서만 허용한다. 색의 존재와 별개로 원본의 동공 위치·홍채 비율을 비교한다.
+
 ### 외곽선
 
 `outlinePolicy`의 필수 골격:
@@ -99,7 +113,7 @@ node scripts/run-pixel-workflow.cjs verify /absolute/path/new-run
 - `grid`: 키와 값은 `{native:[w,h], cell:s, canvas:[W,H], origin:[0,0]}`.
 - `boundaryPolicySha256`: `material-assignment.cjs`의 `policyHash({eyePolicy, formPolicy, outlinePolicy})`로 만든 값. 없는 정책은 `null`로 전달한다.
 - `observation`, `unassigned: preserve-existing-source-regions`.
-- `regions`: `{id, material, polygon, colors, baseColor, boundaryRoles, observation}`. 원본 다각형 중복 금지, 피부 최대 3색, 기본색 필수.
+- `regions`: `{id, material, polygon, colors, baseColor, boundaryRoles, observation, geometry?}`. 원본 다각형 중복 금지, 피부 최대 3색, 기본색 필수. `geometry: "fill"`은 선과 같은 색을 쓰는 **실제 채움 면**을 원본 좌표에서 명시한다. 배경·선 역할과 중복 지정할 수 없으며 `joint-source-band`에서만 지원한다. 해당 표본은 선 추출·연결 복구·접촉선 탐색의 잉크로 쓰지 않고 재질 면적 배정에 사용한다. 한 칸의 과반을 차지하는 명시 면은 저장본의 허용 재질색도 검사한다. 주변 윤곽 검사는 면제하지 않는다.
 - `protectedFeatures`: `{role, rect, sourcePolygon?, observation}`. 눈 다각형과 동일한 보호 형태를 사용한다.
 - `inventory`: `{id, decision: assigned|preserved|absent, regionIds, observation}`. 전체 부위를 확인하며 미확인을 preserved로 바꾸지 않는다.
 
@@ -120,6 +134,8 @@ node scripts/run-pixel-workflow.cjs verify /absolute/path/new-run
 
 ## review.json과 납품
 
+`prepare`의 `diagnostics/`는 자동 생성되는 읽기용 중간 결과다. `trace.json`에 실제 실행 단계, PNG·픽셀 해시, 입력 결속과 변환 오류가 기록된다. 실패한 실행의 파일을 덮어쓰지 말고 새 실행 폴더를 사용한다. `BUILT`/변환 완료 상태는 시각 통과 또는 납품 승인이 아니다.
+
 `prepare`의 `review.pending.json`을 별도 파일로 복사해 직접 관찰한 내용을 채운다. 최종 `stageChecks`에는 1–7단계를 넣으며 1–4단계는 실행 시점 계약과 같아야 한다. `gridDraft.native/expanded/grid`는 pending의 실제 격자 초안과 일치해야 한다. `gridDraft.sourceComparison`에는 원안에서 달라진 선 폭·형태·생략을, `gridDraft.visual`에는 격자 초안의 실제 외곽선·필수 형태 검수를 각각 기록한다. 두 관찰은 다른 시각 검사처럼 `{status, observation, evidence}` 형식이며 누락·미달이면 잠글 수 없다.
 
 `native/expanded`는 현재 후보 파일의 경로·해시다. `evidence` 항목에는 `id`, 파일 증거, `bindings: {source, native, baseline?}` 해시를 넣는다. `sourceReview`, `features`의 `clarity/fidelity`, `views.native/zoom/display` 관찰은 유효한 evidence ID를 인용해야 한다. 전체 이미지 항목 ID는 `$whole`이다.
@@ -127,3 +143,14 @@ node scripts/run-pixel-workflow.cjs verify /absolute/path/new-run
 보이는 눈은 `eyeReview.flatColors/shape/reflection`, 1도트 선은 `outline` 특징의 `boundary.continuity/thickness/staircase/colorSeparation`을 각각 검수한다. `findings`에서 결함이 `RESOLVED`이면 새 `verification`이 필요하다. `OPEN` 또는 미검증은 잠금과 납품 차단 사유다. `lock` 이후 검수 파일도 변경할 수 없다. 저장 후 확인한 `draftPreservation`은 잠긴 격자 초안과 최종본의 동일성만 뜻하며 생성 원안의 두께 보존이나 시각 품질을 대신하지 않는다.
 
 테스트 파일의 합성 PASS 기록은 실제 이미지 검수에 복사하지 않는다. 기술 검사 결과와 원본 의미·형태에 대한 직접 관찰을 분리한다.
+# 연결된 면과 범위가 고정된 수정
+
+`materialPlan.surfaces`는 원본에서 같은 연결 면임을 확인한 관찰 조각만 묶는다. 각 항목은 `id`, `regionIds`, `contourColor`, `observation`을 가진다. 같은 색이라는 이유로 별개의 물체를 합치지 않는다. 피부 면, 그 면의 1도트 경계, 인접 선의 접합부를 함께 배치하며 둘이 한 칸을 요구하면 임의 우선순위로 덮지 않는다. 원본 관찰 구분 이미지의 직접 검수가 필요하다.
+
+같은 원안의 부분 수정은 `materialPlan.preserveOutside`로 변경 범위를 고정할 수 있다. 필드는 `baseline`과 `baselineRun`(각각 절대 경로·SHA256), `sourcePixelsSha256`, 원본 좌표의 `sourceRegions`, `observation`이다. 기준 PNG와 실행 기록이 같은 원안·격자·팔레트에 속하는지 검증한다. 범위 밖은 쓰기 불변 조건이며 **기하 배치의 장애물이나 선 두께 검사의 예외가 아니다**. 기존 실행의 선·채움 근거를 합쳐 최종 PNG 전체를 검사한다. 새 원안에 이전 보존 계약을 재사용할 수 없다.
+
+이미지 도구로 원안 일부를 편집한 경우에는 현재 원안 해시로 새 계획을 만들고 `preserveOutside.sourceEdit: {baselineSourcePixelsSha256, observation}`을 명시할 수 있다. 기준 실행의 원안 파일·디코딩 해시, 동일 캔버스·팔레트, 격자에 맞춘 편집 사각형을 확인하며 **사각형 밖 원안 RGBA가 한 픽셀이라도 바뀌면 차단**한다. 이 검증을 통과한 영역 밖만 이전 실행의 픽셀과 선 검사 근거를 유지한다. 새 원안 전체를 과거 계약으로 위장하거나 검수하지 않은 최종 도트를 합성하는 경로가 아니다.
+
+내부 곡선의 `curve.flow: "smooth"`는 원본에서 둥근 진행이 확인된 경우만 사용한다. 양끝과 중간 경로를 같은 원본 중심선 기준으로 공동 평가하며, 방향 변화가 적다는 이유로 원본 굽힘을 펴지 않는다. 끝의 길이 범위·관찰 지점 사이 상승/하강·극점과 굽힘 폭은 유지한다. 원본의 양끝·극점 관찰이 필요하고, 모서리나 굽힘을 생략하는 옵션이 아니다. 모든 좌표는 원본 관찰용이며 목적지 도트 지정과 저장본 덧칠은 허용하지 않는다.
+
+`smooth` 곡선은 소스 중심선과의 거리도 평가하고, 끝의 길이 방향 범위를 유지하면서 실제 잉크가 걸친 인접 행/열 중 전체 흐름에 맞는 끝점을 함께 선택한다. 격자 경계에 걸친 가장 바깥 픽셀을 무조건 고정해 돌출시키지 않는다. `smooth`가 아닌 모서리 끝점은 원래 끝 범위를 유지한다.

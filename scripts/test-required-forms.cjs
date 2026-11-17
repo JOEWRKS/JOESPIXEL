@@ -91,4 +91,80 @@ test('whole source profile retains a shallow bend and both endpoints without a s
  assert(new Set(points.map(p=>p[1])).size>1);assert.equal(points.length,5);
  assert(allocateRequiredForms(PNG,source,r.image,grid,palette,policy([feature])).image.data.equals(r.image.data));
 });
+test('source-path retains a thick bent open stroke without thickening its fill',()=>{
+ const source=fill(128,64,skin);rect(source,18,18,7,22,ink);rect(source,18,33,40,7,ink);rect(source,51,18,7,22,ink);
+ const curve={version:1,axis:'y',observation:'Two observed ends and the flat lower bend of the source U.',landmarks:[{name:'start',kind:'endpoint',sourceRegion:[16,16,14,14]},{name:'low bend',kind:'max',sourceRegion:[25,30,24,13]},{name:'end',kind:'endpoint',sourceRegion:[49,16,13,14]}]};
+ const base=buildNative(PNG,source,palette,16,8,'#FFF7E6','area-vote').image,p={version:1,placement:'source-path',features:[{...feature,curve}]},a=allocateRequiredForms(PNG,source,base,grid,palette,p);
+ assert.deepEqual(a.report.unresolved,[]);assert.equal(a.report.features[0].action,'source-path-and-adjacent-fill');assert.deepEqual(a.report.features[0].nativeTopology,{components:1,holes:0});
+ const points=[];for(let q=0;q<128;q++){if(a.image.data.readUInt32BE(q*4)===ink)points.push(q);if(q%16<1||q%16>=9||Math.floor(q/16)<1||Math.floor(q/16)>=6)assert.equal(a.image.data.readUInt32BE(q*4),base.data.readUInt32BE(q*4));}
+ assert(new Set(points.map(q=>Math.floor(q/16))).size>=2);assert(new Set(points.map(q=>q%16)).size>=4);assert.equal(inspect(a.image,palette).offPalettePixels,0);
+ const saved=PNG.sync.read(PNG.sync.write(a.image));assert(allocateRequiredForms(PNG,source,saved,grid,palette,p).image.data.equals(saved.data));
+});
+test('vacated source-path ink retains two different adjacent material tones',()=>{
+ const source=fill(128,64,skin),shade=0x763f36ff;rect(source,40,0,88,64,shade);rect(source,18,18,8,22,ink);rect(source,18,32,40,8,ink);rect(source,50,18,8,22,ink);
+ const curve={version:1,axis:'y',observation:'Source U crosses two material tones.',landmarks:[{name:'start',kind:'endpoint',sourceRegion:[16,16,14,14]},{name:'low bend',kind:'max',sourceRegion:[25,30,24,13]},{name:'end',kind:'endpoint',sourceRegion:[49,16,13,14]}]};
+ const f={...feature,curve,contextSamples:[[197,131,78],[118,63,54]]},p={version:1,placement:'source-path',features:[f]},base=buildNative(PNG,source,palette,16,8,'#FFF7E6','area-vote').image,r=allocateRequiredForms(PNG,source,base,grid,palette,p);
+ assert.deepEqual(r.report.unresolved,[]);let restoredShade=0;
+ const touched=new Set();for(let q=0;q<128*64;q++)if(source.data.readUInt32BE(q*4)===ink)touched.add(Math.floor(q/128/8)*16+Math.floor(q%128/8));
+ for(const q of touched)if(q%16>=5&&r.image.data.readUInt32BE(q*4)!==ink){assert.equal(r.image.data.readUInt32BE(q*4),shade);restoredShade++;}
+ assert(restoredShade>0);
+});
+test('unobserved skeleton terminal is not protected as part of an open seam',()=>{
+ const {planObservedCurve}=require('./raster-source-ink-paths.cjs'),mask=new Set();for(let x=16;x<=96;x++)mask.add(32*128+x);for(let y=32;y<=42;y++)mask.add(y*128+56);
+ const curve={version:1,axis:'y',observation:'Straight seam; lower attached spur is not a semantic turn.',landmarks:[{name:'start',kind:'endpoint',sourceRegion:[12,28,10,10]},{name:'end',kind:'endpoint',sourceRegion:[90,28,12,10]}]},fixed=planObservedCurve(mask,128,64,grid,16,8,curve);
+ assert(fixed.curve.ignoredSkeletonEndpoints===1);assert([...fixed.cells].every(p=>Math.floor(p/16)===4));assert.equal(fixed.cells.size,11);
+ assert.throws(()=>planObservedCurve(mask,128,64,grid,16,8,{...curve,target:[3,3]}),/Observed curve/);
+});
+test('required source-path cannot silently use unobserved endpoints',()=>{const s=fill(128,64,skin),base=fill(16,8,skin);rect(s,16,25,40,2,ink);assert.throws(()=>allocateRequiredForms(PNG,s,base,grid,palette,{version:1,placement:'source-path',features:[feature]}),/observed curve landmarks/);});
+test('two bends and a central crest are jointly retained without branches, also after transpose',()=>{
+ const {planObservedCurve}=require('./raster-source-ink-paths.cjs'),points=[[18,16],[18,34],[28,46],[44,46],[60,22],[76,46],[96,46],[110,26]],mask=new Set();
+ for(let y=0;y<64;y++)for(let x=0;x<128;x++)for(let i=1;i<points.length;i++){const[a,b]=points[i-1],[c,d]=points[i],t=Math.max(0,Math.min(1,((x-a)*(c-a)+(y-b)*(d-b))/((c-a)**2+(d-b)**2)));if(Math.hypot(x-a-t*(c-a),y-b-t*(d-b))<=3){mask.add(y*128+x);break;}}
+ const curve={version:1,axis:'y',observation:'Two source bends separated by a raised central cusp.',landmarks:[{name:'start',kind:'endpoint',sourceRegion:[12,10,14,16]},{name:'first bend',kind:'max',sourceRegion:[28,40,18,13]},{name:'crest',kind:'min',sourceRegion:[54,16,14,18]},{name:'second bend',kind:'max',sourceRegion:[78,40,18,13]},{name:'end',kind:'endpoint',sourceRegion:[102,20,15,14]}]};
+ for(const transpose of[false,true])for(const smooth of[false,true]){
+  const sw=transpose?64:128,sh=transpose?128:64,nw=sw/8,nh=sh/8,m=transpose?new Set([...mask].map(p=>p%128*64+Math.floor(p/128))):mask,c=structuredClone(curve);if(transpose){c.axis='x';c.landmarks.forEach(v=>{const[x,y,w,h]=v.sourceRegion;v.sourceRegion=[y,x,h,w];});}
+  if(smooth)c.flow='smooth';
+  const g={x:Array.from({length:nw},(_,i)=>[i*8,(i+1)*8]),y:Array.from({length:nh},(_,i)=>[i*8,(i+1)*8])},r=planObservedCurve(m,sw,sh,g,nw,nh,c),marks=r.curve.landmarks;
+  assert(marks[2].ordinate<marks[1].ordinate&&marks[2].ordinate<marks[3].ordinate);assert(marks[1].minimumRun>=2&&marks[3].minimumRun>=2);
+  let ends=0;for(const p of r.cells){let neighbors=0;for(const q of r.cells)if(p!==q&&Math.max(Math.abs(p%nw-q%nw),Math.abs(Math.floor(p/nw)-Math.floor(q/nw)))===1)neighbors++;assert(neighbors<=2);if(neighbors===1)ends++;}assert.equal(ends,2);
+ }
+ const coarse={x:Array.from({length:4},(_,i)=>[i*32,(i+1)*32]),y:Array.from({length:2},(_,i)=>[i*32,(i+1)*32])};assert.throws(()=>planObservedCurve(mask,128,64,coarse,4,2,curve),/cannot|capacity|collapse/i);
+});
+test('smooth cap crossing a row does not force an extra endpoint step; explicit corners keep their extent',()=>{
+ const {planObservedCurve}=require('./raster-source-ink-paths.cjs'),sw=64,sh=32,nw=16,nh=8,mask=new Set();
+ for(let x=8;x<=36;x++){const y=23-Math.round((x-8)/5);mask.add(y*sw+x);mask.add((y+1)*sw+x);}
+ const g={x:Array.from({length:nw},(_,i)=>[i*4,(i+1)*4]),y:Array.from({length:nh},(_,i)=>[i*4,(i+1)*4])};
+ const curve={version:1,axis:'y',observation:'Shallow two-source-pixel seam; its left cap crosses the row boundary at y24.',landmarks:[{name:'start',kind:'endpoint',sourceRegion:[6,20,6,8]},{name:'end',kind:'endpoint',sourceRegion:[34,15,5,8]}]};
+ const smooth=planObservedCurve(mask,sw,sh,g,nw,nh,{...curve,flow:'smooth'}),corner=planObservedCurve(mask,sw,sh,g,nw,nh,curve);
+ assert.equal(Math.floor(smooth.curve.orderedCells[0]/nw),5,'centered cap must not protrude to the lower row');
+ assert.equal(Math.floor(corner.curve.orderedCells[0]/nw),6,'unqualified corner cap keeps its observed extreme');
+ const support=new Set([...mask].map(p=>Math.floor(p/sw/4)*nw+Math.floor(p%sw/4)));
+ for(const result of [smooth,corner]){assert([...result.cells].every(p=>support.has(p)));assert.deepEqual(result.nativeTopology,{components:1,holes:0});assert.equal(result.cells.size,8);}
+});
+test('smooth shallow stroke jointly fits its cap and middle instead of adding a low terminal dot',()=>{
+ const {planObservedCurve}=require('./raster-source-ink-paths.cjs');
+ // Source-only raster fixture: a gentle rising seam with one trailing cap
+ // pixel in the lower grid row. No destination pixels are supplied to it.
+ const rows=['...............#######','...........###########','........##############','.....######...........','....#####.............','..#####...............','..####................','.##...................','.#....................'];
+ const original=new Set();rows.forEach((row,y)=>[...row].forEach((v,x)=>{if(v==='#')original.add((y+8)*64+x+8);}));
+ const baseCurve={version:1,axis:'y',flow:'smooth',observation:'A shallow rising seam; the thin outer cap is not a lower corner.',landmarks:[{name:'start',kind:'endpoint',sourceRegion:[6,12,7,7]},{name:'end',kind:'endpoint',sourceRegion:[24,6,8,7]}]};
+ const g={x:Array.from({length:16},(_,i)=>[i*4,i*4+4]),y:Array.from({length:16},(_,i)=>[i*4,i*4+4])};
+ for(const transpose of[false,true])for(const reflect of[false,true])for(const reverse of[false,true]){
+  const transform=([x,y],size)=>{let p=transpose?[y,x]:[x,y];return reflect?[size-1-p[0],p[1]]:p;},m=new Set([...original].map(p=>{const[x,y]=transform([p%64,Math.floor(p/64)],64);return y*64+x;})),c=structuredClone(baseCurve);
+  if(transpose)c.axis='x';c.landmarks.forEach(mark=>{const[x,y,a,b]=mark.sourceRegion,points=[[x,y],[x+a-1,y+b-1]].map(p=>transform(p,64)),xs=points.map(p=>p[0]),ys=points.map(p=>p[1]);mark.sourceRegion=[Math.min(...xs),Math.min(...ys),Math.max(...xs)-Math.min(...xs)+1,Math.max(...ys)-Math.min(...ys)+1];});if(reverse)c.landmarks.reverse();
+  const result=planObservedCurve(m,64,64,g,16,16,c),expected=new Set([[2,3],[3,3],[4,2],[5,2],[6,2],[7,2]].map(p=>{const[x,y]=transform(p,16);return y*16+x;}));
+  assert.deepEqual(result.cells,expected,'Same source shape must survive transpose/reflection and observation order');assert.deepEqual(result.nativeTopology,{components:1,holes:0});
+ }
+});
+test('centerline scoring keeps an observed small terminal bend instead of flattening it',()=>{
+ const {planObservedCurve}=require('./raster-source-ink-paths.cjs'),rows=['............','............','............','............','..##........','..##........','..##........','..##........','..##........','..##........','.##.........','.###........','.###........','.###........','...###......','...###......'];
+ const mask=new Set();rows.forEach((row,y)=>[...row].forEach((v,x)=>{if(v==='#')mask.add((y+9)*64+x+8);}));
+ const g={x:Array.from({length:16},(_,i)=>[i*4,i*4+4]),y:Array.from({length:16},(_,i)=>[i*4,i*4+4])},curve={version:1,axis:'x',flow:'smooth',observation:'Vertical source shade with a real rightward terminal bend.',landmarks:[{name:'upper',kind:'endpoint',sourceRegion:[9,11,5,7]},{name:'tip',kind:'endpoint',sourceRegion:[11,22,8,6]}]};
+ for(const reverse of[false,true]){const c=structuredClone(curve);if(reverse)c.landmarks.reverse();const r=planObservedCurve(mask,64,64,g,16,16,c);assert.deepEqual(r.cells,new Set([3*16+2,4*16+2,5*16+2,6*16+3]));assert.deepEqual(r.nativeTopology,{components:1,holes:0});}
+});
+test('a cap farther from its skeleton remains a supported candidate rather than losing the required seam',()=>{
+ const {planObservedCurve}=require('./raster-source-ink-paths.cjs'),rows=['....................','....................','....................','...............#....','...............##...','..............###...','...........####.....','..........####......','........#####.......','......####..........','.#######............','.#####..............'];
+ const mask=new Set();rows.forEach((row,y)=>[...row].forEach((v,x)=>{if(v==='#')mask.add((y+10)*64+x+8);}));
+ const g={x:Array.from({length:16},(_,i)=>[i*4,i*4+4]),y:Array.from({length:16},(_,i)=>[i*4,i*4+4])},curve={version:1,axis:'y',flow:'smooth',observation:'Gentle seam rises to a short thicker cap.',landmarks:[{name:'left',kind:'endpoint',sourceRegion:[8,18,6,6]},{name:'right',kind:'endpoint',sourceRegion:[20,10,6,7]}]};
+ const r=planObservedCurve(mask,64,64,g,16,16,curve);assert.equal(r.curve.orderedCells[0],5*16+2);assert.equal(r.curve.orderedCells.at(-1),3*16+6);assert.equal(r.cells.size,5);assert.deepEqual(r.nativeTopology,{components:1,holes:0});
+});
 console.log(count+' required-form tests passed');

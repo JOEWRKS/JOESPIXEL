@@ -146,7 +146,7 @@ function rasterPath(a,b,connected=true){
 }
 // Geometry-only helper. It never runs the deprecated whole-image recoloring
 // or bounded-feature registration above. Callers retain their own region ownership.
-function traceStrokePaths(mask,width,height,map,scale,tolerance=.35){
+function traceStrokePaths(mask,width,height,map,scale,tolerance=.35,minimumTerminalLength=.65){
  const skeleton=thinMask([...mask],width),graph=new Map();
  for(const p of skeleton){const x=p%width,y=Math.floor(p/width),a=[];
   for(let dy=-1;dy<=1;dy++)for(let dx=-1;dx<=1;dx++){
@@ -163,7 +163,7 @@ function traceStrokePaths(mask,width,height,map,scale,tolerance=.35){
   const length=ids.slice(1).reduce((sum,q,i)=>sum+Math.hypot(q%width-ids[i]%width,Math.floor(q/width)-Math.floor(ids[i]/width))*scale,0);
   // Unrepresentable terminal burrs are discarded in source geometry, not
   // by shaving saved pixels. Full loops and internal junction links remain.
-  if(length<.65&&(graph.get(ids[0]).length===1||graph.get(ids.at(-1)).length===1))return;
+  if(length<minimumTerminalLength&&(graph.get(ids[0]).length===1||graph.get(ids.at(-1)).length===1))return;
   paths.push(simplify(ids.map(map),tolerance));
  }
  for(const[p,a]of graph)if(a.length!==2)for(const q of a)if(!used.has(key(p,q)))trace(p,q);
@@ -312,4 +312,118 @@ function allocateObservedStrokeLayout(PNG,source,base,palette,policy,locked=[],m
  return {image:out,report:{method:'observed-source-stroke-layout',roles:report,expectedColors,audit,limitation:'Source-observed narrow strokes only. Filled dark regions and visual fidelity are not certified by pixel counts.'}};
 }
 
-module.exports={rasterSourceInkPaths,rasterPath,traceStrokePaths,allocateObservedStrokeLayout,auditObservedStrokeLayout,coalesceStrokeJunctions,matchesObservedInk};
+// A source-observed stroke is geometry, not another area-vote color. Plan it
+// before fills are assigned; consumers decide which side owns vacated ink.
+function planSourceStroke(mask,sw,sh,grid,w,h,{closed=false}={}){
+ if(!mask.size)throw Error('Source stroke has no observed pigment');
+ const locate=(axis,v)=>{const a=grid[axis];let i=a.findIndex(([lo,hi])=>v>=lo&&v<hi);if(i<0)throw Error('Source stroke outside grid');return i+(v-a[i][0])/(a[i][1]-a[i][0]);};
+ const step=grid.x[0][1]-grid.x[0][0];
+ if(grid.x.length!==w||grid.y.length!==h||['x','y'].some(a=>grid[a].some(([lo,hi])=>Math.abs(hi-lo-step)>1e-8)))throw Error('Stroke geometry requires a uniform fixed grid');
+ let pathMask=mask;
+ if(closed){
+  // A declared closed boundary owns its cycle, not terminal medial-axis spurs
+  // created by a thick raster corner. Open strokes retain their real endpoints.
+  if(strokeTopology(mask,sw,sh).holes!==1)throw Error('Declared closed stroke must enclose exactly one source interior');
+  const core=new Set(thinMask(mask,sw)),graph=new Map();
+  for(const p of core){const x=p%sw,y=Math.floor(p/sw),neighbors=new Set();for(let dy=-1;dy<=1;dy++)for(let dx=-1;dx<=1;dx++){const q=(y+dy)*sw+x+dx;if((dx||dy)&&x+dx>=0&&x+dx<sw&&y+dy>=0&&y+dy<sh&&core.has(q)&&(!dx||!dy||(!core.has(p+dx)&&!core.has(p+dy*sw))))neighbors.add(q);}graph.set(p,neighbors);}
+  const queue=[...core].filter(p=>graph.get(p).size<2);for(let i=0;i<queue.length;i++){const p=queue[i];if(!core.delete(p))continue;for(const q of graph.get(p)){graph.get(q).delete(p);if(core.has(q)&&graph.get(q).size<2)queue.push(q);}}
+  if(!core.size)throw Error('Closed stroke source cycle is missing');pathMask=core;
+ }
+ const paths=traceStrokePaths(pathMask,sw,sh,p=>[locate('x',p%sw+.5),locate('y',Math.floor(p/sw)+.5)],1/step,.15,1);
+ let cells=new Set();for(const path of paths)for(let i=1;i<path.length;i++)for(const[x,y]of rasterPath(path[i-1],path[i],false)){
+  if(x<0||x>=w||y<0||y>=h)throw Error('Stroke path exceeds canvas');cells.add(y*w+x);
+ }
+ cells=new Set(thinMask(cells,w));cells=coalesceStrokeJunctions(cells,paths,w,h,new Set()).cells;
+ const footprint=new Set();for(const p of mask)footprint.add(Math.floor(locate('y',Math.floor(p/sw)+.5))*w+Math.floor(locate('x',p%sw+.5)));
+ if(!cells.size||[...cells].some(p=>!footprint.has(p)))throw Error('Stroke cannot fit inside observed source coverage');
+ const sourceTopology=strokeTopology(mask,sw,sh),nativeTopology=strokeTopology(cells,w,h);
+ if(sourceTopology.components!==nativeTopology.components||sourceTopology.holes!==nativeTopology.holes){const error=Error('Stroke grid capacity changes source connections or gaps: '+JSON.stringify({sourceTopology,nativeTopology}));error.strokePlan={mask:[...mask],cells:[...cells],paths};throw error;}
+ const blocks=[...cells].filter(p=>p%w+1<w&&p+w+1<w*h&&[p+1,p+w,p+w+1].every(q=>cells.has(q)));
+ if(blocks.length)throw Error('Stroke path contains solid two-cell thickness');
+ return {cells,footprint,paths,sourceTopology,nativeTopology};
+}
+// Joint allocation of an observed OPEN curve. Source windows identify the
+// meaningful ends/turns; skeleton burrs never become protected output dots.
+// Between consecutive extrema the declared axis is monotone. An induced
+// eight-connected path cannot contain a branch, a solid 2x2 or a self-contact.
+function planObservedCurve(mask,sw,sh,grid,w,h,curve){
+ if(!curve||Object.keys(curve).some(k=>!['version','axis','observation','landmarks','flow'].includes(k))||curve.version!==1||!['x','y'].includes(curve.axis)||(curve.flow!==undefined&&curve.flow!=='smooth')||!curve.observation?.trim()||!Array.isArray(curve.landmarks)||curve.landmarks.length<2)throw Error('Observed curve axis, ordered source landmarks and observation required');
+ const step=grid.x[0][1]-grid.x[0][0];if(grid.x.length!==w||grid.y.length!==h||['x','y'].some(a=>grid[a].some(([lo,hi])=>Math.abs(hi-lo-step)>1e-8)))throw Error('Observed curve requires uniform fixed grid');
+ const map=p=>{const x=p%sw+.5,y=Math.floor(p/sw)+.5,gx=grid.x.findIndex(([a,b])=>x>=a&&x<b),gy=grid.y.findIndex(([a,b])=>y>=a&&y<b);if(gx<0||gy<0)throw Error('Observed curve outside grid');return gy*w+gx;};
+ const axis=curve.axis==='x'?0:1,coord=p=>axis?p/ w|0:p%w,sourceCoord=p=>axis?Math.floor(p/sw):p%sw;
+ const skeleton=thinMask(mask,sw),neighbors=p=>{const x=p%sw,y=Math.floor(p/sw),a=[];for(let dy=-1;dy<=1;dy++)for(let dx=-1;dx<=1;dx++){const q=(y+dy)*sw+x+dx;if((dx||dy)&&x+dx>=0&&x+dx<sw&&y+dy>=0&&y+dy<sh&&skeleton.has(q)&&(!dx||!dy||(!skeleton.has(p+dx)&&!skeleton.has(p+dy*sw))))a.push(q);}return a;};
+ const endpoints=new Set([...skeleton].filter(p=>neighbors(p).length===1));
+ const landmarks=curve.landmarks.map((mark,i)=>{
+  const[r,s,a,b]=mark.sourceRegion??[];if(Object.keys(mark).some(k=>!['name','kind','sourceRegion'].includes(k))||!mark.name||!['endpoint','min','max'].includes(mark.kind)||![r,s,a,b].every(Number.isSafeInteger)||r<0||s<0||a<1||b<1||r+a>sw||s+b>sh)throw Error('Curve landmarks require valid source-only windows');
+  if((i===0||i===curve.landmarks.length-1)!==(mark.kind==='endpoint'))throw Error('Curve must start/end at observed endpoints with only extrema between');
+  const samples=[...skeleton].filter(p=>p%sw>=r&&p%sw<r+a&&Math.floor(p/sw)>=s&&Math.floor(p/sw)<s+b&&(mark.kind!=='endpoint'||endpoints.has(p)));
+  if(!samples.length||mark.kind==='endpoint'&&samples.length!==1)throw Error('Curve landmark missing or ambiguous: '+mark.name);
+  const extreme=mark.kind==='min'?Math.min(...samples.map(sourceCoord)):Math.max(...samples.map(sourceCoord));let selected=mark.kind==='endpoint'?samples:samples.filter(p=>sourceCoord(p)===extreme);
+  if(mark.kind==='endpoint'){
+   const tip=samples[0];let at=tip,previous=-1,length=0;
+   while(length<step){const next=neighbors(at).filter(p=>p!==previous);if(next.length!==1)break;const q=next[0];length+=Math.hypot(q%sw-at%sw,Math.floor(q/sw)-Math.floor(at/sw));previous=at;at=q;}
+   const dx=tip%sw-at%sw,dy=Math.floor(tip/sw)-Math.floor(at/sw);if(!dx&&!dy)throw Error('Observed curve endpoint direction is ambiguous');
+   const cap=[...mask].filter(p=>p%sw>=r&&p%sw<r+a&&Math.floor(p/sw)>=s&&Math.floor(p/sw)<s+b),projection=p=>(p%sw-tip%sw)*dx+(Math.floor(p/sw)-Math.floor(tip/sw))*dy,limit=Math.max(...cap.map(projection)),edge=cap.filter(p=>projection(p)===limit),distance=p=>Math.hypot(p%sw-tip%sw,Math.floor(p/sw)-Math.floor(tip/sw)),closest=Math.min(...edge.map(distance));selected=edge.filter(p=>distance(p)===closest);
+  }
+  const ordinate=coord(map(selected[0]));
+  // Smooth caps are located by the source centerline, just like their middle.
+  // A single outer antialias pixel must not pull an entire native endpoint.
+  // Explicit corner/extremum observations retain the existing extent rules.
+  const anchors=mark.kind==='endpoint'&&curve.flow==='smooth'?samples:selected;
+  const distanceFrom=(p,points)=>{const[l,r]=grid.x[p%w],[t,b]=grid.y[Math.floor(p/w)];return Math.min(...points.map(q=>Math.hypot((l+r)/2-(q%sw+.5),(t+b)/2-(Math.floor(q/sw)+.5))))/step;};
+  const displacement=p=>distanceFrom(p,anchors);
+  // Joint placement may choose an adjacent supported cell along the turn,
+  // within one source-cell distance; its extremum row/column cannot move.
+  // A cap may straddle a grid row. Keep its longitudinal extent, but choose
+  // its transverse row jointly with the curve instead of forcing the single
+  // outermost antialiased cap pixel into an extra step.
+  const capAcross=new Set(selected.map(map).map(p=>axis?p%w:Math.floor(p/w)));
+  const supported=[...new Set([...mask].filter(p=>p%sw>=r&&p%sw<r+a&&Math.floor(p/sw)>=s&&Math.floor(p/sw)<s+b).map(map))];
+  const cells=mark.kind==='endpoint'&&curve.flow!=='smooth'?[...new Set(selected.map(map))]:supported.filter(p=>distanceFrom(p,selected)<=1&&(mark.kind==='endpoint'?capAcross.has(axis?p%w:Math.floor(p/w)):coord(p)===ordinate));
+  const across=selected.map(p=>axis?p%sw:Math.floor(p/sw)),minimumRun=mark.kind==='endpoint'?1:Math.ceil((Math.max(...across)-Math.min(...across)+1)/step);
+  if(cells.length<minimumRun)throw Error('Curve turn width exceeds supported grid capacity');return {name:mark.name,kind:mark.kind,cells,sourceSamples:selected,skeletonEndpoint:mark.kind==='endpoint'?samples[0]:null,ordinate,minimumRun,displacements:Object.fromEntries(cells.map(p=>[p,displacement(p)]))};
+ });
+ for(let i=1;i<landmarks.length-1;i++){const a=landmarks[i-1].ordinate,b=landmarks[i].ordinate,c=landmarks[i+1].ordinate;if(landmarks[i].kind==='min'?!(b<a&&b<c):!(b>a&&b>c))throw Error('Grid cannot retain ordered curve extrema: '+landmarks[i].name);}
+ const owner=new Map();for(let i=0;i<landmarks.length;i++)for(const p of landmarks[i].cells){if(owner.has(p))throw Error('Curve landmarks collapse into one grid cell');owner.set(p,i);}
+ const coverage=new Map();for(const p of mask){const q=map(p);coverage.set(q,(coverage.get(q)||0)+1);}const nodes=[...coverage.keys()],index=new Map(nodes.map((p,i)=>[p,i])),bits=nodes.map((_,i)=>1n<<BigInt(i)),adj=nodes.map(p=>{const x=p%w,y=Math.floor(p/w),list=[];for(let dy=-1;dy<=1;dy++)for(let dx=-1;dx<=1;dx++){if(!(dx||dy)||x+dx<0||x+dx>=w||y+dy<0||y+dy>=h)continue;const j=index.get((y+dy)*w+x+dx);if(j!==undefined)list.push(j);}return list;}),neighborBits=adj.map(a=>a.reduce((m,i)=>m|bits[i],0n));
+ const targets=landmarks.map(m=>new Set(m.cells.map(p=>index.get(p))));if(targets.some(s=>!s.size||s.has(undefined)))throw Error('Curve landmark has no observed pigment coverage');
+ // Compare cell centers to the observed skeleton, not just total dark area.
+ // A wider/antialiased edge must not outweigh the actual line trajectory.
+ const sourceDistance=(x,y)=>Math.min(...[...skeleton].map(q=>((x-q%sw-.5)**2+(y-Math.floor(q/sw)-.5)**2)/(step*step)));
+ const center=p=>{const[l,r]=grid.x[p%w],[t,b]=grid.y[Math.floor(p/w)];return [(l+r)/2,(t+b)/2];};
+ const centerError=new Map(nodes.map(p=>[p,sourceDistance(...center(p))]));
+ // Evaluate the intervening segment against the same source geometry as its
+ // ends. Penalizing direction changes alone favors a straight staircase over
+ // a genuine gentle bend. This term does not reward thick/dark pigment area.
+ const segmentErrors=new Map(),segmentError=(a,b)=>{const key=Math.min(a,b)+':'+Math.max(a,b);if(!segmentErrors.has(key)){const[x,y]=center(a),[u,v]=center(b);segmentErrors.set(key,[.25,.5,.75].reduce((sum,t)=>sum+sourceDistance(x+(u-x)*t,y+(v-y)*t),0)/3);}return segmentErrors.get(key);};
+ const distance=(p,q)=>Math.max(Math.abs(p%w-q%w),Math.abs(Math.floor(p/w)-Math.floor(q/w))),remaining=landmarks.map(()=>0);
+ for(let i=landmarks.length-2;i>=0;i--)remaining[i]=remaining[i+1]+Math.min(...landmarks[i].cells.flatMap(p=>landmarks[i+1].cells.map(q=>distance(p,q))));
+ const heap=[],push=s=>{heap.push(s);let i=heap.length-1;while(i){const p=(i-1)>>1;if(heap[p].score<=s.score)break;heap[i]=heap[p];i=p;}heap[i]=s;},pop=()=>{const a=heap[0],last=heap.pop();if(heap.length){let i=0;while(i*2+1<heap.length){let j=i*2+1;if(j+1<heap.length&&heap[j+1].score<heap[j].score)j++;if(heap[j].score>=last.score)break;heap[i]=heap[j];i=j;}heap[i]=last;}return a;};
+ // Different selected anchors can have different valid terminal bends even
+ // when they reach the same frontier. Keep that choice in the search state.
+ const offer=(path,stage,blocked,cost,run=0,anchor=path[0])=>{const last=path.at(-1),heuristic=stage===landmarks.length?0:Math.min(...landmarks[stage].cells.map(p=>distance(nodes[last],p)))+remaining[stage];push({path,stage,blocked,cost,run,anchor,score:cost+heuristic});};
+ for(const i of targets[0])offer([i],1,0n,landmarks[0].displacements[nodes[i]]**2+(curve.flow==='smooth'?centerError.get(nodes[i]):0));let result=null,expanded=0;const best=new Map();
+ while(heap.length){if(++expanded>250000)throw Error('Curve search limit reached; capacity is unverified, not proven impossible');const s=pop(),last=s.path.at(-1),key=s.stage+':'+s.run+':'+last+':'+s.path.at(-2)+':'+s.anchor+':'+s.blocked;if((best.get(key)??Infinity)<=s.cost)continue;best.set(key,s.cost);if(s.stage===landmarks.length){result=s;break;}
+  const from=landmarks[s.stage-1].ordinate,to=landmarks[s.stage].ordinate,direction=Math.sign(to-from),targetOrd=landmarks[s.stage].cells.map(coord),bound=direction>0?Math.max(...targetOrd):Math.min(...targetOrd);
+  for(const next of adj[last]){if((s.blocked&bits[next])||s.path.includes(next))continue;const p=nodes[next],ord=coord(p),old=coord(nodes[last]),which=owner.get(p);if(which!==undefined&&which!==s.stage&&which!==s.stage-1)continue;
+   if(direction===0?ord<Math.min(...targetOrd,from)||ord>Math.max(...targetOrd,from):direction*(ord-old)<0||direction*(bound-ord)<0)continue;
+   const placementCost=curve.flow==='smooth'?1+segmentError(nodes[last],p):2-Math.min(1,coverage.get(p)/(step*step));
+   const atTurn=targets[s.stage].has(next);if(s.run&&!atTurn)continue;
+   // Moving caps transversely must not erase or invert the source-observed
+   // rise/fall between landmarks (e.g. flattening a bent nose into a stem).
+   if(curve.flow==='smooth'&&atTurn&&direction&&Math.sign(ord-coord(nodes[s.anchor]))!==direction)continue;
+   const run=atTurn?s.run+1:0,reached=run>=landmarks[s.stage].minimumRun,stage=s.stage+(reached?1:0),cost=s.cost+placementCost+centerError.get(p)+(atTurn&&!s.run?landmarks[s.stage].displacements[p]**2:0);offer([...s.path,next],stage,s.blocked|neighborBits[last]|bits[last],cost,reached?0:run,reached?next:s.anchor);
+  }
+ }
+ if(!result){const error=Error('Observed curve cannot fit its turns and one-dot separation in this grid');error.curvePlan={landmarks,nodes,expanded};throw error;}
+ const ordered=result.path.map(i=>nodes[i]),cells=new Set(ordered),sourceTopology=strokeTopology(mask,sw,sh),nativeTopology=strokeTopology(cells,w,h);if(sourceTopology.components!==1||sourceTopology.holes!==0||nativeTopology.components!==1||nativeTopology.holes!==0)throw Error('Observed open curve topology conflicts with source');
+ return {cells,footprint:new Set(nodes),paths:[ordered.map(p=>[p%w+.5,Math.floor(p/w)+.5])],sourceTopology,nativeTopology,curve:{method:'joint-ordered-source-extrema',landmarks:landmarks.map(m=>({...m,chosen:ordered.find(p=>m.cells.includes(p))})),orderedCells:ordered,expanded,ignoredSkeletonEndpoints:[...endpoints].filter(p=>!landmarks.some(m=>m.skeletonEndpoint===p||m.sourceSamples.includes(p))).length}};
+}
+function strokeTopology(mask,w,h){
+ if(!mask.size)return {components:0,holes:0};
+ let minX=w,minY=h,maxX=0,maxY=0;for(const p of mask){const x=p%w,y=Math.floor(p/w);minX=Math.min(minX,x);maxX=Math.max(maxX,x);minY=Math.min(minY,y);maxY=Math.max(maxY,y);}
+ const x0=Math.max(0,minX-1),x1=Math.min(w-1,maxX+1),y0=Math.max(0,minY-1),y1=Math.min(h-1,maxY+1);
+ const visit=(foreground)=>{const seen=new Set();let count=0,holes=0;for(let y=y0;y<=y1;y++)for(let x=x0;x<=x1;x++){const p=y*w+x;if(mask.has(p)!==foreground||seen.has(p))continue;count++;const q=[p];seen.add(p);let edge=false;for(let i=0;i<q.length;i++){const a=q[i]%w,b=Math.floor(q[i]/w);edge ||= a===x0||a===x1||b===y0||b===y1;for(let dy=-1;dy<=1;dy++)for(let dx=-1;dx<=1;dx++){const u=a+dx,v=b+dy,n=v*w+u;if(!(dx||dy)||(!foreground&&dx&&dy)||u<x0||u>x1||v<y0||v>y1||seen.has(n)||mask.has(n)!==foreground)continue;seen.add(n);q.push(n);}}if(!edge)holes++;}return {count,holes};};
+ return {components:visit(true).count,holes:visit(false).holes};
+}
+module.exports={rasterSourceInkPaths,rasterPath,traceStrokePaths,allocateObservedStrokeLayout,auditObservedStrokeLayout,coalesceStrokeJunctions,matchesObservedInk,planSourceStroke,planObservedCurve,strokeTopology};

@@ -10,25 +10,25 @@ const hash=bytes=>crypto.createHash('sha256').update(bytes).digest('hex');
 const observation='Synthetic geometry fixture; not visual approval.';
 const pass=()=>({status:'PASS',observation});
 let sequence=0,passed=0;
-function fixture() {
+function fixture({sourceImage=null,paletteColors=['#FFFFFF','#222222'],formPolicy=null,materialRegions=[]}={}) {
   const dir=path.join(root,String(++sequence));fs.mkdirSync(dir);
   const save=(name,value)=>{const file=path.join(dir,name),bytes=Buffer.isBuffer(value)?value:Buffer.from(JSON.stringify(value));fs.writeFileSync(file,bytes);return{path:file,sha256:hash(bytes)};};
-  const source=new PNG({width:24,height:24});source.data.fill(255);
-  for(let y=8;y<16;y++)for(let x=8;x<16;x++)source.data.writeUInt32BE(0x222222ff,(y*24+x)*4);
-  const sourceAsset=save('source.png',PNG.sync.write(source)),paletteAsset=save('palette.json',{colors:['#FFFFFF','#222222']});
-  const palette=b.parsePalette({colors:['#FFFFFF','#222222']});
+  const source=sourceImage??new PNG({width:24,height:24});
+  if(!sourceImage){source.data.fill(255);for(let y=8;y<16;y++)for(let x=8;x<16;x++)source.data.writeUInt32BE(0x222222ff,(y*24+x)*4);}
+  const sourceAsset=save('source.png',PNG.sync.write(source)),paletteAsset=save('palette.json',{colors:paletteColors});
+  const palette=b.parsePalette({colors:paletteColors});
   const eyePolicy={version:1,visibility:'not-visible',observation};
-  const policies={eyePolicy,formPolicy:null,outlinePolicy:null};
-  const grid={native:[6,6],cell:4,canvas:[24,24],origin:[0,0]};
-  const plan={version:1,sourcePixelsSha256:hash(source.data),paletteColors:palette.map(p=>p.hex),grid,boundaryPolicySha256:m.policyHash(policies),observation,unassigned:'preserve-existing-source-regions',regions:[],protectedFeatures:[],inventory:[{id:'marker',decision:'preserved',regionIds:[],observation}]};
+  const policies={eyePolicy,formPolicy,outlinePolicy:null};
+  const grid={native:[source.width/4,source.height/4],cell:4,canvas:[source.width,source.height],origin:[0,0]};
+  const plan={version:1,sourcePixelsSha256:hash(source.data),paletteColors:palette.map(p=>p.hex),grid,boundaryPolicySha256:m.policyHash(policies),observation,unassigned:'preserve-existing-source-regions',regions:materialRegions,protectedFeatures:[],inventory:[{id:'marker',decision:materialRegions.length?'assigned':'preserved',regionIds:materialRegions.map(r=>r.id),observation}]};
   const materialPlan=save('material-plan.json',plan);
-  const map=save('material-map.png',PNG.sync.write(m.compile(PNG,source,palette,6,6,plan,policies).map));
-  const c={version:1,kind:'other',source:sourceAsset,palette:paletteAsset,width:6,height:6,scale:4,paletteCount:2,alpha:'opaque',background:'#FFFFFF',displayTarget:'Synthetic 24x24 preview',eyePolicy,materialPlan,
+  const map=save('material-map.png',PNG.sync.write(m.compile(PNG,source,palette,...grid.native,plan,policies).map));
+  const c={version:1,kind:'other',source:sourceAsset,palette:paletteAsset,width:grid.native[0],height:grid.native[1],scale:4,paletteCount:palette.length,alpha:'opaque',background:paletteColors[0],displayTarget:'Synthetic fixed-grid preview',eyePolicy,formPolicy,materialPlan,
     sourceAssessment:{status:'READY_FOR_CONVERSION',representation:'pixel-designed',sourceSha256:sourceAsset.sha256,observation},
-    gridPlacement:{mode:'fixed-asset-grid',canvas:[24,24],cell:4,origin:[0,0],sourceSha256:sourceAsset.sha256},
+    gridPlacement:{mode:'fixed-asset-grid',canvas:grid.canvas,cell:4,origin:[0,0],sourceSha256:sourceAsset.sha256},
     sourceToNative:{scaleX:0.25,scaleY:0.25,offsetX:0,offsetY:0},features:[{id:'marker',sourceObservation:observation,criterion:'Preserve square shape.'}]};
   const ledger=fixtureSixLedger(sourceAsset,paletteAsset,sourceAsset,grid);ledger.version=3;
-  ledger.stages[0].execution={version:1,route:'fixed-asset-grid',sampling:'source-region-area',operations:['eyePolicy','materialPlan'],fixedGridUserRequest:observation};
+  ledger.stages[0].execution={version:1,route:'fixed-asset-grid',sampling:'source-region-area',operations:['eyePolicy',...(formPolicy?['formPolicy']:[]),'materialPlan'],fixedGridUserRequest:observation};
   delete ledger.stages[2].executionOptions;
   const assignment={...structuredClone(ledger.stages[2]),name:'material-assignment',input:sourceAsset,output:sourceAsset,checks:Object.fromEntries(g.ASSIGNMENT_CHECKS.map(k=>[k,pass()])),executionOptions:g.executionOptions('fixed-asset-grid',c),assignment:{plan:materialPlan,map}};
   ledger.stages.splice(3,0,assignment);ledger.stages.forEach((s,i)=>{s.stage=i+1;s.name=g.SEVEN_NAMES[i];});
@@ -50,6 +50,27 @@ function finish(f){const result=lock(f);return result.locked?workflow.finalize(f
 function test(name,fn){fn();passed++;console.log('PASS '+name);}
 test('prepare creates unreviewed grid draft, never a lock or delivery',()=>{const f=prepared();assert(!fs.existsSync(path.join(f.run,'delivery')));const p=JSON.parse(fs.readFileSync(path.join(f.run,'review.pending.json')));assert.equal(p.gridDraft.visual.status,'UNVERIFIED');assert.equal(workflow.lock(f.run,path.join(f.run,'review.pending.json'),PNG).exported,false);assert(!fs.existsSync(path.join(f.run,'locked-draft')));assert.throws(()=>workflow.finalize(f.run,f.reviewPath,PNG),/must be locked/);});
 test('reviewed grid lock exports exact bytes and verifies unchanged pixels',()=>{const f=prepared();assert.equal(finish(f).exported,true);const v=workflow.verify(f.run,PNG);assert.equal(v.receiptValid,true);assert.equal(v.draftPreservation.changedNativePixels,0);for(const file of ['native.png','display.png'])assert.deepEqual(fs.readFileSync(path.join(f.run,'delivery',file)),fs.readFileSync(path.join(f.run,'locked-draft',file)));});
+
+test('saved form verification retains the same source material context as conversion',()=>{
+ const source=new PNG({width:48,height:48});for(let q=0;q<48*48;q++)source.data.writeUInt32BE(0xf9e6bfff,q*4);
+ for(let y=20;y<25;y++)for(let x=12;x<34;x++)source.data.writeUInt32BE(0x774c41ff,(y*48+x)*4);
+ const formPolicy={version:1,placement:'source-path',features:[{name:'observed seam',kind:'stroke',priority:'required',sourceRegion:[8,16,30,14],color:'#795B59',samples:[[119,76,65]],contextSamples:[[249,230,191]],observation,curve:{version:1,axis:'y',observation,landmarks:[{name:'start',kind:'endpoint',sourceRegion:[11,19,5,7]},{name:'end',kind:'endpoint',sourceRegion:[30,19,5,7]}]}}]};
+ const f=prepared(fixture({sourceImage:source,paletteColors:['#FFF7E6','#F9E6BF','#F4D3B7','#CC9787','#795B59'],formPolicy,materialRegions:[{id:'skin',material:'skin',polygon:[[0,0],[48,0],[48,48],[0,48]],colors:['#F4D3B7','#CC9787'],baseColor:'#F4D3B7',boundaryRoles:[],observation}]}));
+ const native=PNG.sync.read(fs.readFileSync(f.manifest.native.path)),palette=b.parsePalette(JSON.parse(fs.readFileSync(f.c.palette.path))),grid=require('./eye-plane-policy.cjs').affineEyeGrid(source,native,{fitWidth:12,fitHeight:12,offsetX:0,offsetY:0});
+ const unbound=require('./raster-observed-details.cjs').allocateRequiredForms(PNG,source,native,grid,palette,formPolicy);
+ assert(!unbound.image.data.equals(native.data),'fixture must reproduce foreign hair color entering vacated seam context when the material is omitted');
+ assert.equal(finish(f).exported,true);assert.equal(workflow.verify(f.run,PNG).draftPreservation.changedNativePixels,0);
+});
+test('production prepare saves actual source and placement diagnostics automatically',()=>{
+ const f=prepared(),d=path.join(f.run,'diagnostics'),t=JSON.parse(fs.readFileSync(path.join(d,'trace.json')));
+ assert.equal(t.status,'CONVERSION_COMPLETED_REQUIRES_VISUAL_REVIEW');assert.equal(t.bindings.source.sha256,f.c.source.sha256);
+ for(const name of ['source','area-placement']){const s=t.stages.find(s=>s.stage===name);assert(s);const bytes=fs.readFileSync(path.join(d,s.file));assert.equal(hash(bytes),s.pngSha256);assert.equal(hash(PNG.sync.read(bytes).data),s.pixelsSha256);}
+});
+test('conversion failure preserves earlier images and cannot create a delivery',()=>{
+ const f=fixture(),original=b.buildNative,key=require.resolve('./run-pixel-workflow.cjs');
+ b.buildNative=(...args)=>{original(...args);throw Error('deliberate post-render failure');};delete require.cache[key];
+ try{assert.throws(()=>require(key).prepare(f.job.path,f.run,PNG),/deliberate post-render/);const t=JSON.parse(fs.readFileSync(path.join(f.run,'diagnostics/trace.json')));assert.equal(t.status,'CONVERSION_FAILED');assert(t.stages.some(s=>s.stage==='area-placement'));assert(!fs.existsSync(path.join(f.run,'delivery')));}finally{b.buildNative=original;delete require.cache[key];}
+});
 test('missing grid-draft review cannot be replaced by generic PASS',()=>{const f=prepared();delete f.review.gridDraft;assert.throws(()=>finish(f),/Grid-draft review/);});
 test('unreviewed raw-to-grid changes block locking',()=>{const f=prepared();f.review.gridDraft.sourceComparison.status='UNVERIFIED';assert.equal(finish(f).exported,false);});
 test('different grid cannot be frozen under the same review',()=>{const f=prepared();f.review.gridDraft.grid.cell=2;assert.throws(()=>finish(f),/Grid-draft review/);});
@@ -72,6 +93,20 @@ test('missing actual-size review cannot export',()=>{const f=prepared();delete f
 test('open defect cannot be outvoted by passed checks',()=>{const f=prepared();f.review.findings=[{id:'gap',status:'OPEN',description:'Unresolved gap'}];assert.equal(finish(f).exported,false);});
 test('stale evidence binding cannot export',()=>{const f=prepared();f.review.evidence[0].bindings.native='0'.repeat(64);assert.equal(finish(f).exported,false);});
 test('missing stage record prevents creation',()=>{const f=fixture();delete f.c.stageChecks;f.save('contract.json',f.c);assert.throws(()=>workflow.prepare(f.job.path,f.run,PNG),/stage record required/);assert(!fs.existsSync(f.run));});
+test('visible eyes cannot enter production with color cleanup only',()=>{
+ const f=fixture();f.c.eyePolicy={version:1,visibility:'visible',observation:'Observed dark dot.',eyes:[{name:'dot',rect:[8,8,8,8],sourcePolygon:[[8,8],[16,8],[16,16],[8,16]],reflection:'off',roles:[{name:'dot',color:'#222222',colors:['#222222'],samples:[[34,34,34]]}]}]};
+ f.save('contract.json',f.c);assert.throws(()=>workflow.prepare(f.job.path,f.run,PNG),/source-partitions/);assert(!fs.existsSync(f.run));
+});
+test('source partitions without explicit geometry cannot enter new production',()=>{
+ const f=fixture();f.c.eyePolicy={version:1,visibility:'visible',placement:'source-partitions',observation:'Observed filled dot.',eyes:[{name:'dot',rect:[8,8,8,8],sourcePolygon:[[8,8],[16,8],[16,16],[8,16]],reflection:'off',baseRoles:['dot'],partitions:[{name:'interior',observation:'Filled interior.',sourcePolygon:[[9,9],[15,9],[15,15],[9,15]],roles:['dot']}],roles:[{name:'dot',family:'dot',color:'#222222',colors:['#222222'],samples:[[34,34,34]]}]}]};
+ f.save('contract.json',f.c);assert.throws(()=>workflow.prepare(f.job.path,f.run,PNG),/source-stroke-fill/);assert(!fs.existsSync(f.run));
+});
+test('internal stroke without explicit source path cannot enter new production',()=>{
+ const f=fixture();f.c.formPolicy={version:1,features:[{kind:'stroke'}]};f.save('contract.json',f.c);assert.throws(()=>workflow.prepare(f.job.path,f.run,PNG),/source-path/);assert(!fs.existsSync(f.run));
+});
+test('required stroke cannot start production with blanket endpoint protection',()=>{
+ const f=fixture();f.c.formPolicy={version:1,placement:'source-path',features:[{kind:'stroke',priority:'required'}]};f.save('contract.json',f.c);assert.throws(()=>workflow.prepare(f.job.path,f.run,PNG),/observed curve landmarks/);assert(!fs.existsSync(f.run));
+});
 test('legacy routes fail explicitly before writing output',()=>{for(const patch of [{redesign:{}},{measuredConversion:{}},{mode:'scoped-repair'}]){const f=fixture();Object.assign(f.c,patch);f.save('contract.json',f.c);assert.throws(()=>workflow.prepare(f.job.path,f.run,PNG),/Retired/);assert(!fs.existsSync(f.run));}});
 test('grid alteration cannot reuse the locked plan',()=>{const f=fixture();f.c.gridPlacement.cell=2;f.save('contract.json',f.c);assert.throws(()=>workflow.prepare(f.job.path,f.run,PNG),/Fixed asset grid/);});
 test('sampler substitution cannot reuse the locked stages',()=>{const f=fixture();f.save('job.json',{contract:f.contract.path,background:f.c.background,sampling:'nearest'});assert.throws(()=>workflow.prepare(f.job.path,f.run,PNG),/Execution differs/);});

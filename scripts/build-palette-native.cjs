@@ -223,31 +223,56 @@ function refineRegions(PNG, source, native, palette, fit, regions, sourceColors 
   }};
 }
 
-function buildNative(PNG, source, palette, width, height, background, sampling = 'nearest', protection = null, regions = null, structure = null, eyePolicy = null, formPolicy = null, outlinePolicy = null, materialPlan = null) {
+function buildNative(PNG, source, palette, width, height, background, sampling = 'nearest', protection = null, regions = null, structure = null, eyePolicy = null, formPolicy = null, outlinePolicy = null, materialPlan = null, trace = null) {
+  const emit=(stage,image,details)=>require('./conversion-trace.cjs').snapshot(PNG,trace,stage,image,details);
+  emit('source',source);
   if(eyePolicy)require('./eye-plane-policy.cjs').assertEyePolicy(eyePolicy,palette);
   if(materialPlan && sampling!=='source-region-area')throw Error('Material assignment requires source-region-area; no ignored plan or fallback');
   const material=materialPlan?require('./material-assignment.cjs').compile(PNG,source,palette,width,height,require('./material-assignment.cjs').readPlan(materialPlan),{eyePolicy,formPolicy,outlinePolicy}):null;
+  if((material?.fixedCells.size||material?.plan.surfaces?.length)&&outlinePolicy?.layout!=='joint-source-band')throw Error('Surface and preservation constraints require joint-source-band; no ignored contract');
   const built=buildCandidate(PNG,source,palette,width,height,background,sampling,protection,regions,structure,eyePolicy,material,outlinePolicy?.layout==='joint-source-band');
+  built.materialContext=material;
+  if(built.sourceLabels)emit('source-color-assignment',built.sourceLabels);
+  emit('area-placement',built.image);
   if(formPolicy){
     const sourceStrokeRepair = sampling==='source-region-area' &&
       formPolicy.features?.length && formPolicy.features.every(f=>f.kind==='stroke');
     if((sampling!=='area-vote'&&!sourceStrokeRepair)||protection||regions||structure)
       throw Error('Form allocation requires plain area-vote, or observed strokes after source-region-area, without stacked corrections');
     const grid=require('./eye-plane-policy.cjs').affineEyeGrid(source,built.image,built.fit);
-    const forms=require('./raster-observed-details.cjs').allocateRequiredForms(PNG,source,built.image,grid,palette,formPolicy);
+    const forms=require('./raster-observed-details.cjs').allocateRequiredForms(PNG,source,built.image,grid,palette,formPolicy,material);
     built.image=forms.image;built.formReport=forms.report;
+    emit('required-forms',built.image,forms.report);
   }
   if(outlinePolicy&&(protection||regions||structure||(formPolicy&&outlinePolicy.mode!=='source-silhouette-width')||!['area-vote','source-region-area'].includes(sampling)||outlinePolicy.background!==background))
     throw Error('Source ink width allocation requires plain fixed-area conversion and matching background; no stacked repair');
   if(!eyePolicy){if(outlinePolicy)throw Error('Outline conversion must retain the common eye policy');return {...built,eyePolicyReport:{status:'UNASSESSED_CANDIDATE_ONLY'}};}
   const {applyEyePolicy,affineEyeGrid}=require('./eye-plane-policy.cjs');
-  const eyes=applyEyePolicy(PNG,source,built.image,palette,eyePolicy,affineEyeGrid(source,built.image,built.fit));
+  const eyes=applyEyePolicy(PNG,source,built.image,palette,eyePolicy,affineEyeGrid(source,built.image,built.fit),material);
+  if(eyes.sourceRoleMap)emit('eye-source-roles',eyes.sourceRoleMap);
+  emit('eye-placement',eyes.image,eyes.report);
   if(outlinePolicy){
     if(outlinePolicy.layout==='joint-source-band'){
       const owned=require('./raster-owned-stroke-bands.cjs');
       const ownership=require('./eye-plane-policy.cjs').eyeOwnership(source,eyePolicy,width,height);
-      const result=owned.joint(PNG,source,eyes.image,palette,outlinePolicy,material,ownership,built.sourceLabels);
+      // Required internal strokes own their source region and shared grid cells.
+      // Protection stops the exterior owner, never the stroke's own verification.
+      for(const f of formPolicy?.features??[]){
+        const [rx,ry,rw,rh]=f.sourceRegion??[];if(!rw)continue;
+        const formCells=new Set();
+        for(let y=ry;y<ry+rh;y++)for(let x=rx;x<rx+rw;x++){
+          const q=y*source.width+x;if(ownership.mask[q])throw Error('Required form and eye source ownership overlap');
+          const p=Math.floor(y*height/source.height)*width+Math.floor(x*width/source.width);
+          if(ownership.cells.has(p))throw Error('Required form and another feature compete for one grid cell');
+          ownership.mask[q]=1;formCells.add(p);
+        }
+        for(const p of formCells)ownership.cells.add(p);
+      }
+      const result=owned.joint(PNG,source,eyes.image,palette,outlinePolicy,material,ownership,built.sourceLabels,trace);
+      result.report.surfaceAudit=require('./material-surface-layout.cjs').auditMaterialSurfaces(result.image,result.report.surfaceLayout);
+      if(result.report.surfaceAudit.status==='FAIL')throw Error('Source-observed surface or boundary was lost during joint placement: '+JSON.stringify(result.report.surfaceAudit));
       result.report.savedWidth=owned.auditRenderedStrokeBands(result.image,result.report);
+      emit('saved-stroke-audit',result.image,result.report.savedWidth);
       owned.requireRenderedStrokeAudit(result.report.savedWidth);
       if(material){const audit=require('./material-assignment.cjs').audit(result.image,material);if(audit.violations)throw Error('Material ownership overwritten after joint stroke placement: '+audit.violations);built.materialReport={...built.materialReport,audit};}
       return {...built,image:result.image,eyePolicyReport:eyes.report,outlineReport:result.report};
@@ -325,7 +350,7 @@ function buildCandidate(PNG, source, palette, width, height, background, samplin
         sourceRegionReport: segmented.report, shapeRasterReport: result.report };
     }
     const assigned=material?require('./material-assignment.cjs').assignSource(PNG,source,segmented.image,palette,material):null;
-    const result = buildNative(PNG, assigned?.image??segmented.image, palette, width, height, background, 'area-vote');
+    const result = buildCandidate(PNG, assigned?.image??segmented.image, palette, width, height, background, 'area-vote', null, null, null, null, material);
     if(assigned)result.materialReport=assigned.report;
     return { ...result, sampling, sourceRegionReport: segmented.report, ...(shareStrokeLabels?{sourceLabels:assigned?.image??segmented.image}:{}) };
   }
@@ -417,7 +442,14 @@ function buildCandidate(PNG, source, palette, width, height, background, samplin
         }
         // Ties prefer the center's palette entry, otherwise first palette order.
         const total = (right-left) * (bottom-top), epsilon = total * 1e-10;
-        for (let k = 0; k < votes.length; k++) if (votes[k] > votes[chosen] + epsilon) chosen = k;
+        // A reviewed fill family already owns a strict source-area majority.
+        // Its tones must not split that majority and lose to a minority ink
+        // color. Select the tone within that family during cell placement.
+        const fillColors = material?.fillCells?.get((y+offsetY)*width+x+offsetX);
+        const eligible = fillColors ? palette.map((p,k)=>fillColors.includes(p.hex)?k:-1).filter(k=>k>=0) : null;
+        if (eligible && !eligible.includes(chosen)) chosen = eligible[0];
+        for (const k of eligible??votes.keys()) if (votes[k] > votes[chosen] + epsilon) chosen = k;
+        if (eligible && !(votes[chosen] > 0)) throw new Error('Declared fill majority has no supported palette tone');
         const dominance = votes[chosen] / total;
         if (dominance < 0.6) {
           ambiguousCells++;
@@ -576,7 +608,7 @@ function run(configPath) {
       throw new Error('Refusing to overwrite: ' + output);
     }
   }
-  const { image: native, fit, sampling, diagnostics, protectionReport, regionReport, structureReport, sourceRegionReport, shapeRasterReport, eyePolicyReport, formReport, outlineReport } = buildNative(PNG, source, palette,
+  const { image: native, fit, sampling, diagnostics, protectionReport, regionReport, structureReport, sourceRegionReport, shapeRasterReport, eyePolicyReport, formReport, outlineReport, materialContext } = buildNative(PNG, source, palette,
     config.width, config.height, config.background, config.sampling, config.protection, config.regions, config.structure, config.eyePolicy, config.formPolicy??null, config.outlinePolicy??null, config.materialPlan??null);
   const review = enlarge(PNG, native, config.scale);
   const nativeBytes = PNG.sync.write(native);
@@ -597,7 +629,7 @@ function run(configPath) {
   const report = {
     status: 'AWAITING_REVIEW', deliveryEligible: false,
     technicalPass, visualAcceptance: 'NOT ASSESSED BY SCRIPT', config, fit, eyePolicyReport, formReport, outlineReport,
-    savedEyeAudit:require('./eye-plane-policy.cjs').auditEyePolicy(PNG,source,readNative,palette,config.eyePolicy,require('./eye-plane-policy.cjs').affineEyeGrid(source,readNative,fit)),
+    savedEyeAudit:require('./eye-plane-policy.cjs').auditEyePolicy(PNG,source,readNative,palette,config.eyePolicy,require('./eye-plane-policy.cjs').affineEyeGrid(source,readNative,fit),materialContext),
     algorithm: sampling === 'source-shared-boundaries'
       ? 'source segmentation; shared whole-image boundary graph; common edge/junction fitting before integer rasterization; no per-cell color vote or output repaint; full visual review required'
       : sampling === 'source-shape-grid'

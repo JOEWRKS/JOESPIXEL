@@ -53,4 +53,82 @@ test('forged source map is rejected',()=>{const l=ledger(),im=PNG.sync.read(fs.r
 test('execution snapshot includes reviewed plan',()=>assert.equal(g.assertExecution(ledger(),'fixed-asset-grid',{width:6,height:6,scale:4,background:'#FFF7E6',materialPlan:artifact,sampling:'source-region-area'}).status,'MATCH'));
 test('overlapping eye and line windows require actual eye shape',()=>{const l=ledger(),o=l.stages[3].executionOptions;l.stages[0].execution.operations.push('eyePolicy','outlinePolicy');o.eyePolicy={eyes:[{rect:[4,4,12,12]}]};o.outlinePolicy={observedStrokes:{roles:[{rect:[8,4,12,12]}]}};assert.throws(()=>g.assertProductionStages(l,2),/actual eye ownership polygon/);});
 test('material protection cannot contradict the observed eye shape',()=>{const p=structuredClone(plan),o={...policies,eyePolicy:{eyes:[{rect:[4,4,8,8],sourcePolygon:[[4,4],[12,4],[12,12],[4,12]]}]}};p.boundaryPolicySha256=m.policyHash(o);assert.throws(()=>m.compile(PNG,source,palette,6,6,p,o),/eye and material ownership shapes differ/);});
+test('observed internal strokes reserve ink without exempting surrounding skin from its palette',()=>{
+ const im=new PNG({width:48,height:48});for(let p=0;p<48*48;p++)im.data.writeUInt32BE(0xf9e6bfff,p*4);
+ for(let y=20;y<25;y++)for(let x=12;x<34;x++)im.data.writeUInt32BE(0x774c41ff,(y*48+x)*4);
+ const pal=b.parsePalette({colors:['#FFF7E6','#F9E6BF','#F4D3B7','#CC9787','#795B59']});
+ const formPolicy={version:1,placement:'source-path',features:[{name:'observed seam',kind:'stroke',priority:'required',sourceRegion:[8,16,30,14],color:'#795B59',samples:[[119,76,65]],contextSamples:[[249,230,191]],observation,curve:{version:1,axis:'y',observation,landmarks:[{name:'start',kind:'endpoint',sourceRegion:[11,19,5,7]},{name:'end',kind:'endpoint',sourceRegion:[30,19,5,7]}]}}]};
+ const pol={eyePolicy:null,formPolicy,outlinePolicy:null},p={version:1,sourcePixelsSha256:hash(im.data),paletteColors:pal.map(p=>p.hex),grid:{native:[12,12],cell:4,canvas:[48,48],origin:[0,0]},boundaryPolicySha256:m.policyHash(pol),observation,unassigned:'preserve-existing-source-regions',regions:[{id:'skin',material:'skin',polygon:[[0,0],[48,0],[48,48],[0,48]],colors:['#F4D3B7','#CC9787'],baseColor:'#F4D3B7',boundaryRoles:[],observation}],protectedFeatures:[],inventory:[{id:'skin',decision:'assigned',regionIds:['skin'],observation}]};
+ const compiled=m.compile(PNG,im,pal,12,12,p,pol),assigned=m.assignSource(PNG,im,im,pal,compiled);
+ assert.equal(assigned.image.data.readUInt32BE((20*48+14)*4),0x774c41ff);assert.equal(assigned.image.data.readUInt32BE((18*48+14)*4),0xf4d3b7ff);
+ const result=b.buildNative(PNG,im,pal,12,12,'#FFF7E6','source-region-area',null,null,null,null,formPolicy,null,asset('stroke-skin-plan.json',JSON.stringify(p)));
+ assert.deepEqual(result.formReport.unresolved,[]);assert.equal(m.audit(result.image,compiled).violations,0);
+ let seam=0;for(let q=0;q<144;q++){const color=result.image.data.readUInt32BE(q*4);assert([0xf4d3b7ff,0xcc9787ff,0x795b59ff].includes(color));if(color===0x795b59ff)seam++;}assert(seam>2);
+ const split=structuredClone(p),region=split.regions[0];split.regions=[{...region,id:'skin-left',polygon:[[0,0],[17,0],[17,48],[0,48]]},{...region,id:'skin-right',polygon:[[17,0],[48,0],[48,48],[17,48]]}];split.inventory[0].regionIds=split.regions.map(r=>r.id);
+ const splitResult=b.buildNative(PNG,im,pal,12,12,'#FFF7E6','source-region-area',null,null,null,null,formPolicy,null,asset('split-stroke-skin-plan.json',JSON.stringify(split)));assert(splitResult.image.data.equals(result.image.data),'splitting one material into observations must not change its colors or stroke context');
+});
+test('explicit surface membership, not observation IDs or color equality, controls interior protection',()=>{
+ const p=structuredClone(plan);p.protectedFeatures=[];
+ const policy={...policies,outlinePolicy:{sourceStrokeColors:['#24242D']}};p.boundaryPolicySha256=m.policyHash(policy);
+ p.surfaces=[{id:'connected',regionIds:['skin'],contourColor:'#24242D',observation}];
+ const whole=m.compile(PNG,source,palette,6,6,p,policy),r=p.regions[0];
+ p.regions=[{...r,id:'left',polygon:[[4,4],[11,4],[11,20],[4,20]]},{...r,id:'right',polygon:[[11,4],[20,4],[20,20],[11,20]]}];p.inventory[0].regionIds=['left','right'];p.surfaces[0].regionIds=['left','right'];
+ const split=m.compile(PNG,source,palette,6,6,p,policy);assert.deepEqual([...split.interior.keys()],[...whole.interior.keys()]);
+ p.regions.reverse();p.surfaces[0].regionIds.reverse();assert.deepEqual([...m.compile(PNG,source,palette,6,6,p,policy).interior.keys()],[...whole.interior.keys()]);
+ delete p.surfaces;assert(m.compile(PNG,source,palette,6,6,p,policy).interior.size<whole.interior.size,'equal material is not enough to merge unspecified objects');
+});
+test('preservation cannot be silently accepted without same-source executed baseline evidence',()=>{
+ const p=structuredClone(plan);p.preserveOutside={baseline:sourceAsset,sourcePixelsSha256:p.sourcePixelsSha256,sourceRegions:[[4,4,16,16]],observation};
+ assert.throws(()=>m.compile(PNG,source,palette,6,6,p,policies),/baseline grid changed/);
+ const native=new PNG({width:6,height:6});for(let q=0;q<36;q++)native.data.writeUInt32BE(0xf4d3b7ff,q*4);p.preserveOutside.baseline=asset('fixed.png',PNG.sync.write(native));
+ assert.throws(()=>m.compile(PNG,source,palette,6,6,p,policies),/executed stroke evidence/);
+ p.preserveOutside.sourcePixelsSha256='0'.repeat(64);assert.throws(()=>m.compile(PNG,source,palette,6,6,p,policies),/same observed source/);
+});
+for(const rotated of [false,true])test('declared dark fill survives contour thinning with its bend and gap '+rotated,()=>{
+ const W=64,im=new PNG({width:W,height:W}),pal=b.parsePalette({colors:['#FFFFFF','#432443','#FFCC99']});
+ const at=(x,y)=>rotated?[W-1-y,x]:[x,y];
+ for(let y=0;y<W;y++)for(let x=0;x<W;x++){
+  const [u,v]=at(x,y),body=x>=8&&x<56&&y>=8&&y<56,rim=body&&(x<12||x>=52||y<12||y>=52);
+  const bent=x>=16&&x<44&&y>=28&&y<36||x>=36&&x<44&&y>=20&&y<28;
+  const gap=x>=28&&x<32&&y>=28&&y<32;
+  im.data.writeUInt32BE(gap?0xffffffff:rim||bent?0x432443ff:body?0xffcc99ff:0xffffffff,(v*W+u)*4);
+ }
+ const eyePolicy={version:1,visibility:'not-visible',observation:'Synthetic material fixture has no eyes',eyes:[]};
+ const outlinePolicy={version:1,layout:'joint-source-band',width:1,background:'#FFFFFF',backgroundTolerance:10,sourceStrokeColors:['#432443'],sourceInkRoles:[{name:'shared dark pigment',kind:'mixed',color:'#432443',observation:'Narrow outer rim shares pigment with filled interior bend'}]},pol={eyePolicy,formPolicy:null,outlinePolicy};
+ const rects=[[16,28,12,8],[32,28,12,8],[28,32,4,4],[36,20,8,8]],transform=([x,y])=>rotated?[64-y,x]:[x,y];
+ const regions=rects.map(([x,y,w,h],i)=>({id:'fill-'+i,material:'cloth',geometry:'fill',polygon:[[x,y],[x+w,y],[x+w,y+h],[x,y+h]].map(transform),colors:['#432443'],baseColor:'#432443',boundaryRoles:[],observation}));
+ const p={version:1,sourcePixelsSha256:hash(im.data),paletteColors:pal.map(c=>c.hex),grid:{native:[16,16],cell:4,canvas:[64,64],origin:[0,0]},boundaryPolicySha256:m.policyHash(pol),observation,unassigned:'preserve-existing-source-regions',regions,protectedFeatures:[],inventory:[{id:'cloth',decision:'assigned',regionIds:regions.map(r=>r.id),observation}]};
+ const old=b.buildNative(PNG,im,pal,16,16,'#FFFFFF','source-region-area',null,null,null,eyePolicy,null,outlinePolicy);
+ const compiled=m.compile(PNG,im,pal,16,16,p,pol),out=b.buildNative(PNG,im,pal,16,16,'#FFFFFF','source-region-area',null,null,null,eyePolicy,null,outlinePolicy,asset('fill-'+rotated+'.json',JSON.stringify(p)));
+ assert(compiled.fillCells.size>8);assert([...compiled.fillCells.keys()].some(q=>old.image.data.readUInt32BE(q*4)!==0x432443ff),'fixture must reproduce a real lost fill');
+ for(const q of compiled.fillCells.keys())assert.equal(out.image.data.readUInt32BE(q*4),0x432443ff);
+ assert.equal(m.audit(out.image,compiled).violations,0);
+ const [gx,gy]=at(29,29);assert.equal(out.image.data.readUInt32BE((Math.floor(gy/4)*16+Math.floor(gx/4))*4),0xffffffff);
+ const broken=PNG.sync.read(PNG.sync.write(out.image));broken.data.writeUInt32BE(0xffcc99ff,[...compiled.fillCells.keys()][0]*4);assert(m.audit(broken,compiled).lostFillCells.length>0);
+ const line=out.outlineReport.pathCells[0];broken.data.writeUInt32BE(0xffffffff,line*4);assert.equal(require('./raster-owned-stroke-bands.cjs').auditRenderedStrokeBands(broken,out.outlineReport).status,'FAIL');
+ const invalid=structuredClone(p);invalid.regions[0].geometry='stroke';assert.throws(()=>m.compile(PNG,im,pal,16,16,invalid,pol),/explicit fill/);
+ // A new source may preserve its old output only after exact outside-source,
+ // grid, palette and executed-baseline evidence checks, never by assumption.
+ const baseSource=asset('edit-base-source-'+rotated+'.png',PNG.sync.write(im)),baseNative=asset('edit-base-native-'+rotated+'.png',PNG.sync.write(out.image)),basePalette=asset('edit-base-palette-'+rotated+'.json',JSON.stringify({colors:pal.map(c=>c.hex)}));
+ const run=asset('edit-base-run-'+rotated+'.json',JSON.stringify({source:baseSource,native:baseNative,palette:basePalette,outlineReport:out.outlineReport}));
+ const edited=PNG.sync.read(PNG.sync.write(im));edited.data.writeUInt32BE(0xffffffff,(14*64+14)*4);
+ const editPlan=structuredClone(p);editPlan.sourcePixelsSha256=hash(edited.data);editPlan.preserveOutside={baseline:baseNative,baselineRun:run,sourcePixelsSha256:hash(edited.data),sourceRegions:[[12,12,4,4]],observation,sourceEdit:{baselineSourcePixelsSha256:hash(im.data),observation}};
+ assert.equal(m.compile(PNG,edited,pal,16,16,editPlan,pol).fixedCells.size,255);
+ const undeclared=structuredClone(editPlan);delete undeclared.preserveOutside.sourceEdit;assert.throws(()=>m.compile(PNG,edited,pal,16,16,undeclared,pol),/different source/);
+ const outside=PNG.sync.read(PNG.sync.write(edited));outside.data.writeUInt32BE(0xffcc99ff,0);const outsidePlan=structuredClone(editPlan);outsidePlan.sourcePixelsSha256=outsidePlan.preserveOutside.sourcePixelsSha256=hash(outside.data);assert.throws(()=>m.compile(PNG,outside,pal,16,16,outsidePlan,pol),/outside declared/);
+ const wrong=structuredClone(editPlan);wrong.preserveOutside.sourceEdit.baselineSourcePixelsSha256='0'.repeat(64);assert.throws(()=>m.compile(PNG,edited,pal,16,16,wrong,pol),/executed baseline source/);
+ const misaligned=structuredClone(editPlan);misaligned.preserveOutside.sourceRegions=[[13,12,4,4]];assert.throws(()=>m.compile(PNG,edited,pal,16,16,misaligned,pol),/grid-aligned/);
+ const reordered=structuredClone(editPlan);reordered.paletteColors.reverse();assert.throws(()=>m.compile(PNG,edited,[...pal].reverse(),16,16,reordered,pol),/baseline palette/);
+});
+test('three tones of a declared majority fill do not lose their cell to minority ink',()=>{
+ const pal=b.parsePalette({colors:['#FFFFFF','#24242D','#34343F','#464653','#5E5B66']}),im=new PNG({width:32,height:32});
+ for(let y=0;y<32;y++)for(let x=0;x<32;x++){const body=x>=4&&x<28&&y>=4&&y<28,rim=body&&(x<8||x>=24||y<8||y>=24);im.data.writeUInt32BE(rim?0x24242dff:body?0x464653ff:0xffffffff,(y*32+x)*4);}
+ const fillPoints=[];for(let y=12;y<16;y++)for(let x=12;x<16;x++){const i=(y-12)*4+x-12;im.data.writeUInt32BE(i<9?[0x34343fff,0x464653ff,0x5e5b66ff][Math.floor(i/3)]:0x24242dff,(y*32+x)*4);if(i<9)fillPoints.push([x,y]);}
+ const eyePolicy={version:1,visibility:'not-visible',observation,eyes:[]},outlinePolicy={version:1,layout:'joint-source-band',width:1,background:'#FFFFFF',backgroundTolerance:0,sourceStrokeColors:['#24242D'],sourceInkRoles:[{name:'observed ink',kind:'mixed',color:'#24242D',observation}]},pol={eyePolicy,formPolicy:null,outlinePolicy};
+ const p={version:1,sourcePixelsSha256:hash(im.data),paletteColors:pal.map(c=>c.hex),grid:{native:[8,8],cell:4,canvas:[32,32],origin:[0,0]},boundaryPolicySha256:m.policyHash(pol),observation,unassigned:'preserve-existing-source-regions',regions:[{id:'material',material:'cloth',geometry:'fill',polygon:[[12,12],[16,12],[16,14],[13,14],[13,15],[12,15]],colors:['#34343F','#464653','#5E5B66'],baseColor:'#464653',boundaryRoles:[],observation}],protectedFeatures:[],inventory:[{id:'cloth',decision:'assigned',regionIds:['material'],observation}]};
+ const raw=b.buildNative(PNG,im,pal,8,8,'#FFFFFF','area-vote');assert.equal(raw.image.data.readUInt32BE((3*8+3)*4),0x24242dff,'fixture reproduces minority-color victory');
+ const out=b.buildNative(PNG,im,pal,8,8,'#FFFFFF','source-region-area',null,null,null,eyePolicy,null,outlinePolicy,asset('three-tone-majority.json',JSON.stringify(p)));
+ assert(p.regions[0].colors.includes('#'+out.image.data.subarray((3*8+3)*4,(3*8+3)*4+3).toString('hex').toUpperCase()));
+ assert.equal(out.outlineReport.savedWidth.status,'PASS');assert.equal(b.inspect(out.image,pal).offPalettePixels,0);
+});
 console.log(JSON.stringify({passed,scope:'Ownership/stage-gate mechanics only, not artwork quality',directory:dir}));

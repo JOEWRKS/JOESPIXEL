@@ -25,6 +25,10 @@ function sourceGate(contract, PNG) {
   require('./stage-gates.cjs').assertProductionStages(contract.stageChecks,2,{pixelSourceSha256:contract.source?.sha256,paletteSha256:contract.palette?.sha256,grid:{canvas:[contract.width*contract.scale,contract.height*contract.scale],cell:contract.scale,native:[contract.width,contract.height],origin:[0,0]}});
   need(contract.stageChecks?.stages?.[0]?.execution?.sampling === 'source-region-area', 'Production requires source-region-area');
   require('./eye-plane-policy.cjs').assertEyePolicy(contract.eyePolicy,parsePalette(read(contract.palette.path)));
+  need(contract.eyePolicy.visibility!=='visible'||contract.eyePolicy.placement==='source-partitions','New visible-eye production requires observed source-partitions; color cleanup alone cannot approve eye shape');
+    need(contract.eyePolicy.visibility!=='visible'||contract.eyePolicy.geometryPolicy==='source-stroke-fill','New visible-eye production requires explicit source-stroke-fill geometry; protected eyes are not exempt from stroke checks');
+    need(!contract.formPolicy?.features?.some(f=>f.kind==='stroke')||contract.formPolicy.placement==='source-path','New internal stroke production requires source-path placement');
+    need(!contract.formPolicy?.features?.some(f=>f.kind==='stroke'&&f.priority==='required'&&!f.curve),'Required internal strokes need observed curve landmarks before production');
   need(contract.version===1 && ['character','other'].includes(contract.kind), 'Explicit contract version/kind required');
   checkArtifact(contract.source); checkArtifact(contract.palette);
   const planned=read(contract.palette.path).sourceRolePlanning;
@@ -56,7 +60,11 @@ function prepare(jobPath, outputDir, PNG) {
   if(planned)need(planned.sourcePixelsSha256===hash(source.data)&&JSON.stringify(planned.sourceSize)===JSON.stringify([source.width,source.height]),'Palette source-role plan belongs to different source pixels');
   need(palette.length===contract.paletteCount, 'Palette entry count mismatch');
   const args=[PNG,source,palette,contract.width,contract.height,job.background];
-  const built=buildNative(...args,job.sampling??'area-vote',null,null,job.structure??null,contract.eyePolicy,contract.formPolicy??null,contract.outlinePolicy??null,contract.materialPlan??null);
+  const trace=require('./conversion-trace.cjs').createTrace(path.join(outputDir,'diagnostics'),{contract:artifact(job.contract),job:artifact(jobPath),source:contract.source,palette:contract.palette,materialPlan:contract.materialPlan??null,grid:contract.gridPlacement,converters:converters()});
+  let built;try{
+    built=buildNative(...args,job.sampling??'area-vote',null,null,job.structure??null,contract.eyePolicy,contract.formPolicy??null,contract.outlinePolicy??null,contract.materialPlan??null,trace.record);
+    trace.finish('CONVERSION_COMPLETED_REQUIRES_VISUAL_REVIEW');
+  }catch(error){trace.finish('CONVERSION_FAILED',error.message);throw error;}
   const {fit}=built, map=contract.sourceToNative;
   need(map && Math.abs(map.scaleX-fit.fitWidth/source.width)<1e-12 && Math.abs(map.scaleY-fit.fitHeight/source.height)<1e-12 &&
     map.offsetX===fit.offsetX && map.offsetY===fit.offsetY, 'Contract and conversion coordinates differ');
@@ -71,7 +79,7 @@ function prepare(jobPath, outputDir, PNG) {
   const manifest={version:2,status:'GRID_DRAFT_AWAITING_REVIEW',contract:artifact(contractPath),conversion:artifact(input),
     source:contract.source,palette:contract.palette,baseline,native,expanded,converters:converters(),stats,fit,
     materialReport:built.materialReport??null,structureReport:built.structureReport??null,sourceRegionReport:built.sourceRegionReport??null,shapeRasterReport:built.shapeRasterReport??null,eyePolicyReport:built.eyePolicyReport,formReport:built.formReport??null,outlineReport:built.outlineReport??null,
-    savedEyeAudit:require('./eye-plane-policy.cjs').auditEyePolicy(PNG,source,saved,palette,contract.eyePolicy,require('./eye-plane-policy.cjs').affineEyeGrid(source,saved,fit)),manualOutputEdits:0};
+    savedEyeAudit:require('./eye-plane-policy.cjs').auditEyePolicy(PNG,source,saved,palette,contract.eyePolicy,require('./eye-plane-policy.cjs').affineEyeGrid(source,saved,fit),built.materialContext),manualOutputEdits:0};
   write(path.join(outputDir,'run.json'),manifest);
   const pending=()=>({status:'UNVERIFIED',observation:'Direct comparison of saved PNG against source required.',evidence:[]});
   write(path.join(outputDir,'review.pending.json'),{version:1,reviewer:'',contractSha256:manifest.contract.sha256,
