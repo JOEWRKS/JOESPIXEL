@@ -2,7 +2,7 @@
 
 // Experimental source-space color segmentation. This does not certify shape
 // fidelity and is deliberately not the default conversion mode.
-function segmentSourceRegions(PNG, source, palette, width, height, options = {}) {
+function segmentSourceRegions(PNG, source, palette, width, height, options = {}, material = null) {
   if(Object.keys(options).some(k=>!['preserveSmallRegions','coherentPlanes'].includes(k))||
     Object.values(options).some(value=>typeof value!=='boolean'))
     throw Error('Invalid source-region options');
@@ -16,18 +16,24 @@ function segmentSourceRegions(PNG, source, palette, width, height, options = {})
   };
   const entries = palette.map(p => ({ ...p, lab: toLab(p.rgb), chroma: chroma(p.rgb) }));
   const initial = new Uint16Array(count), cache = new Map();
+  const materialChoices=material?.plan.regions.map(r=>new Set(r.colors));
+  const materialDomain=p=>material?(material.sourceExceptions[p]?-2:material.owners[p]<0?-1:material.materialGroups[material.owners[p]]):0;
   for (let p = 0; p < count; p++) {
     const raw = source.data.readUInt32BE(p * 4);
-    let chosen = cache.get(raw);
+    const owner=material&&!material.sourceExceptions[p]?material.owners[p]:-1;
+    const family=owner>=0?material.materialGroups[owner]:-1;
+    const key=family+':'+raw, allowed=owner>=0?materialChoices[owner]:null;
+    let chosen = cache.get(key);
     if (chosen === undefined) {
       const rgb = [...source.data.subarray(p * 4, p * 4 + 3)];
       const lab = toLab(rgb), normalized = chroma(rgb);
       let best = Infinity;
       entries.forEach((entry, index) => {
+        if(allowed&&!allowed.has(entry.hex))return;
         const score = distance(lab, entry.lab) + .05 * distance(normalized, entry.chroma);
         if (score < best) { best = score; chosen = index; }
       });
-      cache.set(raw, chosen);
+      cache.set(key, chosen);
     }
     initial[p] = chosen;
   }
@@ -83,7 +89,7 @@ function segmentSourceRegions(PNG, source, palette, width, height, options = {})
       let support = 0;
       for (const q of [x ? p - 1 : -1, x < w - 1 ? p + 1 : -1,
         y ? p - w : -1, y < h - 1 ? p + w : -1]) {
-        if (q < 0 || initial[q] !== index) continue;
+        if (q < 0 || initial[q] !== index || materialDomain(q)!==materialDomain(start)) continue;
         support++;
         if (!visited[q]) { visited[q] = 1; queue[length++] = q; }
       }
@@ -92,11 +98,17 @@ function segmentSourceRegions(PNG, source, palette, width, height, options = {})
         for (let c = 0; c < 3; c++) sum[c] += source.data[p * 4 + c];
       }
     }
-    if (hasSeed || core.length < 2 || length < 4) continue;
-    const rgb = sum.map(v => v / core.length), label = centers.length;
-    centers.push({ index, count: core.length, rgb, lab: toLab(rgb), local: true });
-    for (const p of core) labels[p] = label;
-    seedCount += core.length; smallComponentSeeds += core.length; smallComponents++;
+    if(hasSeed)continue;
+    const explicitlyObserved=material&&(material.owners[start]>=0||material.sourceExceptions[start]);
+    if((core.length<2||length<4)&&!explicitlyObserved)continue;
+    // A small, explicitly assigned source region cannot borrow a different
+    // material's prototype merely because it has no radius-sized interior.
+    const seeds=core.length?core:Array.from(queue.subarray(0,length));
+    const observedSum=[0,0,0];for(const p of seeds)for(let c=0;c<3;c++)observedSum[c]+=source.data[p*4+c];
+    const rgb=observedSum.map(v=>v/seeds.length),label=centers.length;
+    centers.push({index,count:seeds.length,rgb,lab:toLab(rgb),local:true});
+    for(const p of seeds)labels[p]=label;
+    seedCount+=seeds.length;smallComponentSeeds+=seeds.length;smallComponents++;
   }
 
   // Grow only through source pixels, using their distance from observed source
@@ -135,6 +147,8 @@ function segmentSourceRegions(PNG, source, palette, width, height, options = {})
   const labs = new Map();
   function offer(p, label, parentCost) {
     if (p < 0 || labels[p] >= 0) return;
+    if(material&&!material.sourceExceptions[p]&&material.owners[p]>=0&&
+      !materialChoices[material.owners[p]].has(palette[centers[label].index].hex))return;
     const raw = source.data.readUInt32BE(p * 4);
     let lab = labs.get(raw);
     if (!lab) {
@@ -155,15 +169,15 @@ function segmentSourceRegions(PNG, source, palette, width, height, options = {})
   }
   const image = new PNG({ width: w, height: h });
   for (let p = 0; p < count; p++) {
-    if (labels[p] < 0) throw new Error('Unassigned source pixel');
+    if (labels[p] < 0) throw new Error('Unassigned source pixel '+JSON.stringify({x:p%w,y:Math.floor(p/w),owner:material?.owners[p],color:palette[initial[p]].hex}));
     image.data.set([...palette[centers[labels[p]].index].rgb, 255], p * 4);
   }
   const planeReport = options.coherentPlanes
-    ? consolidateSourcePlanes(source, image, palette) : null;
+    ? consolidateSourcePlanes(source, image, palette, material) : null;
   return {
     image,
     report: {
-      status: 'EXPERIMENTAL_NOT_A_FIDELITY_PASS', radius, seedCount, preserveSmallRegions, smallComponents, smallComponentSeeds, planeReport,
+      status: 'EXPERIMENTAL_NOT_A_FIDELITY_PASS', method:material?'material-constrained-connected-planes':'source-connected-planes', radius, seedCount, preserveSmallRegions, smallComponents, smallComponentSeeds, planeReport,
       sourceCenters: centers.map(c => ({ palette: palette[c.index].hex, rgb: c.rgb, samples: c.count, local: !!c.local })),
       limitation: 'Subpixel or unsupported source regions may still be lost. Source color retention is not target shape fidelity.',
     },
@@ -173,7 +187,7 @@ function segmentSourceRegions(PNG, source, palette, width, height, options = {})
 // Palette labels are proposals, not proof of distinct source shading. Reject a
 // boundary only when connected source regions have weak observed contrast that
 // quantization amplifies at least threefold. Never smooth destination pixels.
-function consolidateSourcePlanes(source, segmented, palette) {
+function consolidateSourcePlanes(source, segmented, palette, material=null) {
   const { toLab } = require('./build-palette-native.cjs');
   const w = source.width, h = source.height, n = w * h;
   if (segmented.width !== w || segmented.height !== h) throw Error('Source-plane size mismatch');
@@ -181,6 +195,7 @@ function consolidateSourcePlanes(source, segmented, palette) {
   const maxContrast = .02, amplification = 3;
   const ids = new Int32Array(n).fill(-1), queue = new Int32Array(n);
   const values = Uint32Array.from({length:n}, (_, p) => segmented.data.readUInt32BE(p * 4));
+  const domain=p=>material?(material.sourceExceptions[p]?-2:material.owners[p]<0?-1:material.materialGroups[material.owners[p]]):0;
   const regions = [];
   const neighbors = p => {
     const x = p % w, y = Math.floor(p / w);
@@ -195,7 +210,7 @@ function consolidateSourcePlanes(source, segmented, palette) {
       const p = queue[head++];
       for (let c=0; c<3; c++) sum[c] += source.data[p*4+c];
       for (const q of neighbors(p)) {
-        if (q<0 || ids[q]>=0 || values[q]!==values[start]) continue;
+        if (q<0 || ids[q]>=0 || values[q]!==values[start] || domain(q)!==domain(start)) continue;
         ids[q]=id; queue[tail++]=q;
       }
     }
@@ -205,7 +220,7 @@ function consolidateSourcePlanes(source, segmented, palette) {
   const adjacent = new Set();
   for (let p=0; p<n; p++) {
     for (const q of [p%w<w-1 ? p+1 : -1, p+w<n ? p+w : -1]) {
-      if(q>=0 && ids[p]!==ids[q]) adjacent.add([Math.min(ids[p],ids[q]),Math.max(ids[p],ids[q])].join(':'));
+      if(q>=0 && ids[p]!==ids[q] && domain(p)===domain(q) && domain(p)!==-2) adjacent.add([Math.min(ids[p],ids[q]),Math.max(ids[p],ids[q])].join(':'));
     }
   }
   const candidates=[];

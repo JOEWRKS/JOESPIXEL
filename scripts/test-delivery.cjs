@@ -10,7 +10,7 @@ const hash=bytes=>crypto.createHash('sha256').update(bytes).digest('hex');
 const observation='Synthetic geometry fixture; not visual approval.';
 const pass=()=>({status:'PASS',observation});
 let sequence=0,passed=0;
-function fixture({sourceImage=null,paletteColors=['#FFFFFF','#222222'],formPolicy=null,materialRegions=[]}={}) {
+function fixture({sourceImage=null,paletteColors=['#FFFFFF','#222222'],formPolicy=null,materialRegions=[],outlinePolicy=null,outlineDecision=null}={}) {
   const dir=path.join(root,String(++sequence));fs.mkdirSync(dir);
   const save=(name,value)=>{const file=path.join(dir,name),bytes=Buffer.isBuffer(value)?value:Buffer.from(JSON.stringify(value));fs.writeFileSync(file,bytes);return{path:file,sha256:hash(bytes)};};
   const source=sourceImage??new PNG({width:24,height:24});
@@ -18,7 +18,7 @@ function fixture({sourceImage=null,paletteColors=['#FFFFFF','#222222'],formPolic
   const sourceAsset=save('source.png',PNG.sync.write(source)),paletteAsset=save('palette.json',{colors:paletteColors});
   const palette=b.parsePalette({colors:paletteColors});
   const eyePolicy={version:1,visibility:'not-visible',observation};
-  const policies={eyePolicy,formPolicy,outlinePolicy:null};
+  const policies={eyePolicy,formPolicy,outlinePolicy};
   const grid={native:[source.width/4,source.height/4],cell:4,canvas:[source.width,source.height],origin:[0,0]};
   const plan={version:1,sourcePixelsSha256:hash(source.data),paletteColors:palette.map(p=>p.hex),grid,boundaryPolicySha256:m.policyHash(policies),observation,unassigned:'preserve-existing-source-regions',regions:materialRegions,protectedFeatures:[],inventory:[{id:'marker',decision:materialRegions.length?'assigned':'preserved',regionIds:materialRegions.map(r=>r.id),observation}]};
   const materialPlan=save('material-plan.json',plan);
@@ -26,9 +26,9 @@ function fixture({sourceImage=null,paletteColors=['#FFFFFF','#222222'],formPolic
   const c={version:1,kind:'other',source:sourceAsset,palette:paletteAsset,width:grid.native[0],height:grid.native[1],scale:4,paletteCount:palette.length,alpha:'opaque',background:paletteColors[0],displayTarget:'Synthetic fixed-grid preview',eyePolicy,formPolicy,materialPlan,
     sourceAssessment:{status:'READY_FOR_CONVERSION',representation:'pixel-designed',sourceSha256:sourceAsset.sha256,observation},
     gridPlacement:{mode:'fixed-asset-grid',canvas:grid.canvas,cell:4,origin:[0,0],sourceSha256:sourceAsset.sha256},
-    sourceToNative:{scaleX:0.25,scaleY:0.25,offsetX:0,offsetY:0},features:[{id:'marker',sourceObservation:observation,criterion:'Preserve square shape.'}]};
+    sourceToNative:{scaleX:0.25,scaleY:0.25,offsetX:0,offsetY:0},features:[{id:'marker',sourceObservation:observation,criterion:'Preserve square shape.'}],...(outlinePolicy?{outlinePolicy,outlineDecision}:{})};
   const ledger=fixtureSixLedger(sourceAsset,paletteAsset,sourceAsset,grid);ledger.version=3;
-  ledger.stages[0].execution={version:1,route:'fixed-asset-grid',sampling:'source-region-area',operations:['eyePolicy',...(formPolicy?['formPolicy']:[]),'materialPlan'],fixedGridUserRequest:observation};
+  ledger.stages[0].execution={version:1,route:'fixed-asset-grid',sampling:'source-region-area',operations:['eyePolicy',...(formPolicy?['formPolicy']:[]),...(outlinePolicy?['outlinePolicy']:[]),'materialPlan'],fixedGridUserRequest:observation};
   delete ledger.stages[2].executionOptions;
   const assignment={...structuredClone(ledger.stages[2]),name:'material-assignment',input:sourceAsset,output:sourceAsset,checks:Object.fromEntries(g.ASSIGNMENT_CHECKS.map(k=>[k,pass()])),executionOptions:g.executionOptions('fixed-asset-grid',c),assignment:{plan:materialPlan,map}};
   ledger.stages.splice(3,0,assignment);ledger.stages.forEach((s,i)=>{s.stage=i+1;s.name=g.SEVEN_NAMES[i];});
@@ -39,7 +39,8 @@ function fixture({sourceImage=null,paletteColors=['#FFFFFF','#222222'],formPolic
 function prepared(f=fixture()) {
   f.manifest=workflow.prepare(f.job.path,f.run,PNG);const x=f.manifest;
   for(let i=4;i<7;i++){f.ledger.stages[i].input=i===4?x.source:x.native;f.ledger.stages[i].output=x.native;f.ledger.stages[i].evidence=[x.source,x.native];}
-  const observed=()=>({...pass(),evidence:['comparison']});
+  let check=0;
+  const observed=()=>({...pass(),evidence:['comparison'],comparison:{sourceRegion:[0,0,f.c.width*4,f.c.height*4],difference:'Synthetic comparison '+(++check),criterion:'Fixture shape remains square.',reason:'Recorded fixture evidence only; not actual art approval.'}});
   f.review={version:1,reviewer:observation,contractSha256:x.contract.sha256,native:x.native,expanded:x.expanded,stageChecks:f.ledger,
     gridDraft:{native:x.native,expanded:x.expanded,grid:{native:[f.c.width,f.c.height],cell:f.c.scale,canvas:[f.c.width*f.c.scale,f.c.height*f.c.scale],origin:[0,0]},sourceComparison:observed(),visual:observed()},
     evidence:[{id:'comparison',...x.expanded,bindings:{source:x.source.sha256,native:x.native.sha256}}],sourceReview:observed(),features:['marker','$whole'].map(id=>({id,clarity:observed(),fidelity:observed()})),views:{native:observed(),zoom:observed(),display:observed()},findings:[]};
@@ -51,6 +52,9 @@ function test(name,fn){fn();passed++;console.log('PASS '+name);}
 test('prepare creates unreviewed grid draft, never a lock or delivery',()=>{const f=prepared();assert(!fs.existsSync(path.join(f.run,'delivery')));const p=JSON.parse(fs.readFileSync(path.join(f.run,'review.pending.json')));assert.equal(p.gridDraft.visual.status,'UNVERIFIED');assert.equal(workflow.lock(f.run,path.join(f.run,'review.pending.json'),PNG).exported,false);assert(!fs.existsSync(path.join(f.run,'locked-draft')));assert.throws(()=>workflow.finalize(f.run,f.reviewPath,PNG),/must be locked/);});
 test('reviewed grid lock exports exact bytes and verifies unchanged pixels',()=>{const f=prepared();assert.equal(finish(f).exported,true);const v=workflow.verify(f.run,PNG);assert.equal(v.receiptValid,true);assert.equal(v.draftPreservation.changedNativePixels,0);for(const file of ['native.png','display.png'])assert.deepEqual(fs.readFileSync(path.join(f.run,'delivery',file)),fs.readFileSync(path.join(f.run,'locked-draft',file)));});
 
+test('generic PASS without a source comparison cannot lock',()=>{const f=prepared();delete f.review.features[0].fidelity.comparison;const result=lock(f);assert.equal(result.exported,false);assert(result.issues.some(i=>i.detail.includes('separate source region')));});
+test('copied comparison cannot masquerade as independent visual review',()=>{const f=prepared();f.review.features[1].fidelity=structuredClone(f.review.features[0].fidelity);const result=lock(f);assert.equal(result.exported,false);assert(result.issues.some(i=>i.detail.includes('duplicated comparison')));});
+
 test('saved form verification retains the same source material context as conversion',()=>{
  const source=new PNG({width:48,height:48});for(let q=0;q<48*48;q++)source.data.writeUInt32BE(0xf9e6bfff,q*4);
  for(let y=20;y<25;y++)for(let x=12;x<34;x++)source.data.writeUInt32BE(0x774c41ff,(y*48+x)*4);
@@ -60,6 +64,23 @@ test('saved form verification retains the same source material context as conver
  const unbound=require('./raster-observed-details.cjs').allocateRequiredForms(PNG,source,native,grid,palette,formPolicy);
  assert(!unbound.image.data.equals(native.data),'fixture must reproduce foreign hair color entering vacated seam context when the material is omitted');
  assert.equal(finish(f).exported,true);assert.equal(workflow.verify(f.run,PNG).draftPreservation.changedNativePixels,0);
+});
+test('prepare accepts required forms on joint-source-band without the legacy outline mode',()=>{
+ // joint-source-band takes formPolicy features as ownership and never reads
+ // outlinePolicy.mode; a contract must not need an unused mode to pass.
+ const source=new PNG({width:48,height:48});for(let q=0;q<48*48;q++)source.data.writeUInt32BE(0xffffffff,q*4);
+ for(let y=8;y<40;y++)for(let x=8;x<40;x++)source.data.writeUInt32BE(x<12||x>=36||y<12||y>=36?0x432443ff:0xf4d3b7ff,(y*48+x)*4);
+ for(let y=20;y<24;y++)for(let x=16;x<32;x++)source.data.writeUInt32BE(0x795b59ff,(y*48+x)*4);
+ const formPolicy={version:1,placement:'source-path',features:[{name:'observed seam',kind:'stroke',priority:'required',sourceRegion:[13,17,22,10],color:'#795B59',samples:[[121,91,89]],contextSamples:[[244,211,183]],observation,curve:{version:1,axis:'y',observation,landmarks:[{name:'start',kind:'endpoint',sourceRegion:[15,19,5,6]},{name:'end',kind:'endpoint',sourceRegion:[28,19,5,6]}]}}]};
+ const outlinePolicy={version:1,layout:'joint-source-band',width:1,background:'#FFFFFF',backgroundTolerance:10,colors:['#432443'],sourceStrokeColors:['#432443'],sourceInkRoles:[{name:'fixture contour',kind:'stroke',color:'#432443',paletteColors:['#432443'],observation}],curveFlow:{version:1,method:'anchored-source-curve'}};
+ assert.equal(outlinePolicy.mode,undefined);
+ const f=prepared(fixture({sourceImage:source,paletteColors:['#FFFFFF','#432443','#F4D3B7','#795B59'],formPolicy,outlinePolicy,outlineDecision:{mode:'continuous',width:1,colorPolicy:'darker-local-material'}}));
+ const run=JSON.parse(fs.readFileSync(path.join(f.run,'run.json')));
+ assert.deepEqual(run.formReport.unresolved,[]);assert.equal(run.outlineReport.method,'joint-source-band');
+ const pal=b.parsePalette({colors:['#FFFFFF','#432443','#F4D3B7','#795B59']}),eye={version:1,visibility:'not-visible',observation};
+ // The legacy contour route still needs its reviewed mode before taking forms.
+ const {layout,curveFlow,...legacy}=outlinePolicy;
+ assert.throws(()=>b.buildNative(PNG,source,pal,12,12,'#FFFFFF','source-region-area',null,null,null,eye,formPolicy,legacy),/legacy mode "source-silhouette-width"/);
 });
 test('production prepare saves actual source and placement diagnostics automatically',()=>{
  const f=prepared(),d=path.join(f.run,'diagnostics'),t=JSON.parse(fs.readFileSync(path.join(d,'trace.json')));

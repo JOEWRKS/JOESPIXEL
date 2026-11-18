@@ -231,6 +231,10 @@ function buildNative(PNG, source, palette, width, height, background, sampling =
   const material=materialPlan?require('./material-assignment.cjs').compile(PNG,source,palette,width,height,require('./material-assignment.cjs').readPlan(materialPlan),{eyePolicy,formPolicy,outlinePolicy}):null;
   if((material?.fixedCells.size||material?.plan.surfaces?.length)&&outlinePolicy?.layout!=='joint-source-band')throw Error('Surface and preservation constraints require joint-source-band; no ignored contract');
   const built=buildCandidate(PNG,source,palette,width,height,background,sampling,protection,regions,structure,eyePolicy,material,outlinePolicy?.layout==='joint-source-band');
+  const requireClaims=(image,claims,phase)=>{
+    const changed=claims.filter(([p,c])=>image.data.readUInt32BE(p*4)!==c);
+    if(changed.length)throw Error(phase+' overwrote previously assigned feature cells: '+changed.map(([p])=>p).join(','));
+  };
   built.materialContext=material;
   if(built.sourceLabels)emit('source-color-assignment',built.sourceLabels);
   emit('area-placement',built.image);
@@ -243,38 +247,61 @@ function buildNative(PNG, source, palette, width, height, background, sampling =
     const forms=require('./raster-observed-details.cjs').allocateRequiredForms(PNG,source,built.image,grid,palette,formPolicy,material);
     built.image=forms.image;built.formReport=forms.report;
     emit('required-forms',built.image,forms.report);
+    if(forms.report.unresolved.length)throw Error('Required source forms unresolved: '+forms.report.unresolved.map(name=>{
+      const r=forms.report.features.find(r=>r.name===name);
+      return name+(r?.action?' ('+r.action+(r.edges?' at '+r.edges.join('/')+' edge of sourceRegion; see input-contract contextSamples':'')+')':'');
+    }).join(', '));
   }
-  if(outlinePolicy&&(protection||regions||structure||(formPolicy&&outlinePolicy.mode!=='source-silhouette-width')||!['area-vote','source-region-area'].includes(sampling)||outlinePolicy.background!==background))
-    throw Error('Source ink width allocation requires plain fixed-area conversion and matching background; no stacked repair');
+  // Required forms must be owned by the outline route. joint-source-band takes
+  // formPolicy features as ownership and never reads mode; only the legacy
+  // contour route needs the reviewed source-silhouette-width mode for that.
+  const outlineOwnsForms=outlinePolicy?.layout==='joint-source-band'||outlinePolicy?.mode==='source-silhouette-width';
+  if(outlinePolicy&&(protection||regions||structure||(formPolicy&&!outlineOwnsForms)||!['area-vote','source-region-area'].includes(sampling)||outlinePolicy.background!==background))
+    throw Error('Source ink width allocation requires plain fixed-area conversion and matching background; no stacked repair'+
+      (formPolicy&&!outlineOwnsForms?' (required forms need outlinePolicy.layout "joint-source-band" or legacy mode "source-silhouette-width")':''));
   if(!eyePolicy){if(outlinePolicy)throw Error('Outline conversion must retain the common eye policy');return {...built,eyePolicyReport:{status:'UNASSESSED_CANDIDATE_ONLY'}};}
   const {applyEyePolicy,affineEyeGrid}=require('./eye-plane-policy.cjs');
   const eyes=applyEyePolicy(PNG,source,built.image,palette,eyePolicy,affineEyeGrid(source,built.image,built.fit),material);
+  requireClaims(eyes.image,built.formReport?.expectedColors??[],'Eye placement');
   if(eyes.sourceRoleMap)emit('eye-source-roles',eyes.sourceRoleMap);
   emit('eye-placement',eyes.image,eyes.report);
   if(outlinePolicy){
     if(outlinePolicy.layout==='joint-source-band'){
       const owned=require('./raster-owned-stroke-bands.cjs');
       const ownership=require('./eye-plane-policy.cjs').eyeOwnership(source,eyePolicy,width,height);
-      // Required internal strokes own their source region and shared grid cells.
+      // Search rectangles locate a feature; only its actual pigment and
+      // touched grid cells belong to it. This matches material exceptions.
       // Protection stops the exterior owner, never the stroke's own verification.
       for(const f of formPolicy?.features??[]){
         const [rx,ry,rw,rh]=f.sourceRegion??[];if(!rw)continue;
+        const isStroke=require('./raster-observed-details.cjs').sourceStrokeClassifier(f);
         const formCells=new Set();
         for(let y=ry;y<ry+rh;y++)for(let x=rx;x<rx+rw;x++){
-          const q=y*source.width+x;if(ownership.mask[q])throw Error('Required form and eye source ownership overlap');
+          const q=y*source.width+x;
+          if(!isStroke([...source.data.subarray(q*4,q*4+3)]))continue;
+          if(ownership.mask[q])throw Error('Required form and eye source ownership overlap');
           const p=Math.floor(y*height/source.height)*width+Math.floor(x*width/source.width);
           if(ownership.cells.has(p))throw Error('Required form and another feature compete for one grid cell');
           ownership.mask[q]=1;formCells.add(p);
         }
         for(const p of formCells)ownership.cells.add(p);
       }
+      const assignedFeatures=[...ownership.cells].map(p=>[p,eyes.image.data.readUInt32BE(p*4)]);
       const result=owned.joint(PNG,source,eyes.image,palette,outlinePolicy,material,ownership,built.sourceLabels,trace);
+      requireClaims(result.image,assignedFeatures,'Joint boundary placement');
+      requireClaims(result.image,built.formReport?.expectedColors??[],'Joint boundary placement');
       result.report.surfaceAudit=require('./material-surface-layout.cjs').auditMaterialSurfaces(result.image,result.report.surfaceLayout);
       if(result.report.surfaceAudit.status==='FAIL')throw Error('Source-observed surface or boundary was lost during joint placement: '+JSON.stringify(result.report.surfaceAudit));
       result.report.savedWidth=owned.auditRenderedStrokeBands(result.image,result.report);
       emit('saved-stroke-audit',result.image,result.report.savedWidth);
       owned.requireRenderedStrokeAudit(result.report.savedWidth);
-      if(material){const audit=require('./material-assignment.cjs').audit(result.image,material);if(audit.violations)throw Error('Material ownership overwritten after joint stroke placement: '+audit.violations);built.materialReport={...built.materialReport,audit};}
+      if(material){
+        const allocations=new Map([...result.report.expectedColors,...result.report.expectedFillColors]);
+        const audit=require('./material-assignment.cjs').audit(result.image,material,allocations);
+        emit('material-audit',result.image,audit);
+        if(audit.violations)throw Error('Material ownership overwritten after joint stroke placement: '+JSON.stringify(audit.invalidColors));
+        built.materialReport={...built.materialReport,audit};
+      }
       return {...built,image:result.image,eyePolicyReport:eyes.report,outlineReport:result.report};
     }
     // Separate feature ownership from pass order. A later contour operation
@@ -301,6 +328,20 @@ function buildNative(PNG, source, palette, width, height, background, sampling =
   if(material){const audit=require('./material-assignment.cjs').audit(eyes.image,material);if(audit.violations)throw Error('Material ownership overwritten after placement: '+audit.violations);built.materialReport={...built.materialReport,audit};}
   return {...built,image:eyes.image,eyePolicyReport:eyes.report};
 }
+function resolveSourcePlanes(PNG,source,palette,width,height,eyePolicy,material,options={coherentPlanes:true,preserveSmallRegions:true}){
+  const segmented=require('./source-region-palette.cjs').segmentSourceRegions(PNG,source,palette,width,height,options,material);
+  // Eye source samples belong to the observed role planner, not a global
+  // palette classifier. Context outside those shapes keeps the shared labels.
+  if(eyePolicy?.visibility==='visible')for(const eye of eyePolicy.eyes){
+    const[x,y,w,h]=eye.rect;if(x+w>source.width||y+h>source.height)throw Error('Eye region outside source');
+    for(let row=Math.ceil(y);row<Math.ceil(y+h);row++)for(let col=Math.ceil(x);col<Math.ceil(x+w);col++)
+      if(require('./eye-plane-policy.cjs').eyeOwnsSource(eye,col+.5,row+.5)){
+        const begin=(row*source.width+col)*4;source.data.copy(segmented.image.data,begin,begin,begin+4);
+      }
+  }
+  if(material)material.sourceLabels=segmented.image;
+  return segmented;
+}
 function buildCandidate(PNG, source, palette, width, height, background, sampling = 'nearest', protection = null, regions = null, structure = null, eyePolicy = null, material = null, shareStrokeLabels = false) {
   if (structure && protection) throw new Error('Structure and legacy protection must be separate candidates.');
   if (protection && regions?.length) throw new Error('Compare legacy protection and regions as separate candidates.');
@@ -316,25 +357,8 @@ function buildCandidate(PNG, source, palette, width, height, background, samplin
   if (!bg) throw new Error('Background must be an exact palette entry.');
   if (['source-region-area', 'source-shape-grid', 'source-shared-boundaries'].includes(sampling)) {
     if (protection || regions || structure) throw new Error('Compare source-region conversion without stacked corrections.');
-    const segmented = require('./source-region-palette.cjs')
-      .segmentSourceRegions(PNG, source, palette, width, height,
-        { coherentPlanes: sampling === 'source-region-area', preserveSmallRegions: shareStrokeLabels });
-    // Whole-image color seeds can swallow small, explicitly observed eye roles.
-    // Preserve their ORIGINAL source samples before cell assignment; this is not
-    // a destination-pixel repair or an invented highlight/iris template.
-    if(sampling==='source-region-area'&&eyePolicy?.visibility==='visible'){
-      for(const eye of eyePolicy.eyes){
-        const [x,y,w,h]=eye.rect;
-        if(x+w>source.width||y+h>source.height)throw Error('Eye region outside source');
-        const left=Math.ceil(x),right=Math.ceil(x+w);
-        for(let row=Math.ceil(y);row<Math.ceil(y+h);row++){
-          for(let col=left;col<right;col++)if(require('./eye-plane-policy.cjs').eyeOwnsSource(eye,col+.5,row+.5)){
-            const begin=(row*source.width+col)*4;source.data.copy(segmented.image.data,begin,begin,begin+4);
-          }
-        }
-      }
-      segmented.report.preservedEyeSourceRegions=eyePolicy.eyes.map(e=>({name:e.name,rect:e.rect,sourcePolygon:e.sourcePolygon??null}));
-    }
+    const segmented=resolveSourcePlanes(PNG,source,palette,width,height,sampling==='source-region-area'?eyePolicy:null,material,
+      {coherentPlanes:sampling==='source-region-area',preserveSmallRegions:shareStrokeLabels});
     if (sampling === 'source-shared-boundaries') {
       const result = require('./raster-shared-boundaries.cjs')
         .rasterSharedBoundaries(PNG, segmented.image, width, height, background);
@@ -349,10 +373,10 @@ function buildCandidate(PNG, source, palette, width, height, background, samplin
       return { image: result.image, fit: { fitWidth, fitHeight, offsetX, offsetY }, sampling,
         sourceRegionReport: segmented.report, shapeRasterReport: result.report };
     }
-    const assigned=material?require('./material-assignment.cjs').assignSource(PNG,source,segmented.image,palette,material):null;
-    const result = buildCandidate(PNG, assigned?.image??segmented.image, palette, width, height, background, 'area-vote', null, null, null, null, material);
-    if(assigned)result.materialReport=assigned.report;
-    return { ...result, sampling, sourceRegionReport: segmented.report, ...(shareStrokeLabels?{sourceLabels:assigned?.image??segmented.image}:{}) };
+    if(material)material.sourceLabels=segmented.image;
+    const result = buildCandidate(PNG, segmented.image, palette, width, height, background, 'area-vote', null, null, null, null, material);
+    if(material)result.materialReport={method:segmented.report.method,interiorCells:material.interior.size,planeReport:segmented.report.planeReport};
+    return { ...result, sampling, sourceRegionReport: segmented.report, ...(shareStrokeLabels?{sourceLabels:segmented.image}:{}) };
   }
   const colorIndex = hex => palette.findIndex(c => c.hex === String(hex).toUpperCase());
   const fraction = n => Number.isFinite(n) && n > 0 && n <= 1;
@@ -681,7 +705,7 @@ function assertFixedGridPlacement(contract, source) {
     throw Error('Required saved-stroke thickness audit is not configured; missing sourceStrokeColors cannot pass as zero defects');
   return true;
 }
-module.exports = { parsePalette, inspect, buildNative, refineRegions, enlarge, exactBlocks, verifyDisplay, preserveSourceColors, toLab, assertFixedGridPlacement };
+module.exports = { parsePalette, inspect, buildNative, resolveSourcePlanes, refineRegions, enlarge, exactBlocks, verifyDisplay, preserveSourceColors, toLab, assertFixedGridPlacement };
 if (require.main === module) {
   try {
     if (process.argv.length !== 3) throw new Error('Usage: node build-palette-native.cjs job.json');

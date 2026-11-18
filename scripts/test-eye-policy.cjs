@@ -123,4 +123,21 @@ test('splitting same-family same-color observations cannot change the winning to
  assert(x.image.data.equals(y.image.data));assert.equal(y.image.data.readUInt32BE(0),0x206080ff);
  split.eyes[0].roles.reverse();assert(applyEyePolicy(PNG,s,native,palette,split,g).image.data.equals(x.image.data));
 });
+test('observed oval keeps width and height across subcell phases without changing surrounding eye',()=>{
+ for(const cx of [32,36]){
+  const s=new PNG({width:80,height:64});s.data.fill(255);for(let y=8;y<52;y++)for(let x=16;x<64;x++)s.data.set([48,128,160,255],(y*80+x)*4);
+  for(let y=0;y<64;y++)for(let x=0;x<80;x++)if(((x+.5-cx)/8)**2+((y+.5-28)/12)**2<=1)s.data.set([16,16,16,255],(y*80+x)*4);
+  const poly=[[8,4],[72,4],[72,56],[8,56]],p={version:1,visibility:'visible',placement:'source-partitions',geometryPolicy:'source-stroke-fill',observation:'One observed vertical oval within an iris at two grid phases.',eyes:[{name:'eye',rect:[8,4,64,52],sourcePolygon:poly,reflection:'off',baseRoles:['pupil','iris','white'],partitions:[{name:'observed eye',sourcePolygon:poly,roles:['pupil','iris','white'],observation:'Original source colors define the pupil and iris.'}],roles:[
+   {name:'pupil',family:'iris',geometry:'fill',shape:'source-oval',protect:true,color:'#101010',colors:['#101010'],samples:[[16,16,16]]},
+   {name:'iris',family:'iris',geometry:'fill',color:'#3080A0',colors:['#3080A0'],samples:[[48,128,160]]},
+   {name:'white',family:'white',geometry:'fill',color:'#FFFFFF',colors:['#FFFFFF'],samples:[[255,255,255]]}]}]};
+  const b=buildNative(PNG,s,palette,10,8,'#FFFFFF','area-vote').image,g=affineEyeGrid(s,b,{fitWidth:10,fitHeight:8,offsetX:0,offsetY:0}),plain=structuredClone(p);delete plain.eyes[0].roles[0].shape;
+  const before=applyEyePolicy(PNG,s,b,palette,plain,g),after=applyEyePolicy(PNG,s,b,palette,p,g),shape=after.report.eyes[0].fillShapes[0];
+  assert.deepEqual(shape.nativeExtent,[2,3]);assert.equal(shape.cells.length,6);assert(shape.centerDisplacementCells<=.51);
+  for(let q=0;q<80;q++)if(!shape.cells.includes(q)&&!shape.cleared.includes(q))assert.equal(after.image.data.readUInt32BE(q*4),before.image.data.readUInt32BE(q*4));
+  if(cx===36)assert(!before.image.data.equals(after.image.data),'offset source must exercise actual restoration');
+  assert.equal(auditEyePolicy(PNG,s,after.image,palette,p,g).status,'PASS');
+  const bad=structuredClone(p);bad.eyes[0].roles[0].geometry='stroke';bad.eyes[0].roles[0].width=1;assert.throws(()=>assertEyePolicy(bad,palette),/protected source fill/);
+ }
+});
 console.log(n+' eye policy checks passed');

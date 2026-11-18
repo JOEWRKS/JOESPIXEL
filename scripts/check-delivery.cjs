@@ -76,9 +76,11 @@ function checkDelivery(contractPath, reviewPath, PNG) {
   eyeGrid??=eyeRules.affineEyeGrid(source,native,{fitWidth:source.width*fit.scaleX,fitHeight:source.height*fit.scaleY,offsetX:fit.offsetX,offsetY:fit.offsetY});
   const eyeSource=source;
   const material=contract.materialPlan?require('./material-assignment.cjs').compile(PNG,source,palette,native.width,native.height,require('./material-assignment.cjs').readPlan(contract.materialPlan),{eyePolicy:contract.eyePolicy,formPolicy:contract.formPolicy??null,outlinePolicy:contract.outlinePolicy??null}):null;
+  if(material)require('./build-palette-native.cjs').resolveSourcePlanes(PNG,source,palette,native.width,native.height,contract.eyePolicy,material,
+    {coherentPlanes:true,preserveSmallRegions:contract.outlinePolicy?.layout==='joint-source-band'});
   const savedEyeAudit=eyeRules.auditEyePolicy(PNG,eyeSource,native,palette,contract.eyePolicy,eyeGrid,material);
   if(savedEyeAudit.status==='FAIL')add('technical','FAIL','Saved eyes violate flat-role policy: '+savedEyeAudit.nonconformingCells);
-  if(material){const audit=require('./material-assignment.cjs').audit(native,material);if(audit.violations)add('shape','FAIL','Stored material assignment violated: '+audit.violations);}
+  if(material&&contract.outlinePolicy?.layout!=='joint-source-band'){const audit=require('./material-assignment.cjs').audit(native,material);if(audit.violations)add('shape','FAIL','Stored material assignment violated: '+audit.violations);}
   if(contract.outlinePolicy){
     try{
       if(contract.outlinePolicy.observedStrokes||contract.outlinePolicy.layout==='joint-source-band'){
@@ -92,6 +94,11 @@ function checkDelivery(contractPath, reviewPath, PNG) {
         if(contract.outlinePolicy.layout==='joint-source-band'){
           const audit=require('./raster-owned-stroke-bands.cjs').auditRenderedStrokeBands(native,rebuilt.outlineReport);
           if(audit.renderedStrokeChecked!==true||audit.status!=='PASS')add('shape',audit.status==='UNVERIFIED'?'UNVERIFIED':'FAIL','Saved PNG stroke width/continuity: '+JSON.stringify(audit));
+          if(material){
+            const allocations=new Map([...rebuilt.outlineReport.expectedColors,...rebuilt.outlineReport.expectedFillColors]);
+            const colors=require('./material-assignment.cjs').audit(native,material,allocations);
+            if(colors.violations)add('shape','FAIL','Stored material assignment violated: '+colors.violations);
+          }
         }
         if(!rebuilt.image.data.equals(native.data))add('shape','FAIL','Stored image differs from complete source material/eye/outline placement');
       }else{
@@ -147,12 +154,21 @@ function checkDelivery(contractPath, reviewPath, PNG) {
       add('evidence', 'UNVERIFIED', entry.id + ': source/output/baseline binding missing or stale');
     }
   }
+  const comparisons=new Set();
   function observation(item, label, gate) {
     if (!item || !['PASS', 'FAIL', 'UNVERIFIED'].includes(item.status) || !nonempty(item.observation) ||
       !Array.isArray(item.evidence) || !item.evidence.length || !item.evidence.every(id => evidenceIds.has(id))) {
       add(gate, 'UNVERIFIED', label + ': observation and valid evidence required');
       return;
     }
+    const c=item.comparison,r=c?.sourceRegion;
+    if(!c||!['difference','criterion','reason'].every(k=>nonempty(c[k]))||
+      !Array.isArray(r)||r.length!==4||!r.every(Number.isInteger)||r[0]<0||r[1]<0||r[2]<=0||r[3]<=0||r[0]+r[2]>source.width||r[1]+r[3]>source.height){
+      add(gate,'UNVERIFIED',label+': separate source region, observed difference, criterion and verdict reason required');return;
+    }
+    const key=JSON.stringify([r,c.difference.trim(),c.criterion.trim(),c.reason.trim()]);
+    if(comparisons.has(key))add(gate,'UNVERIFIED',label+': duplicated comparison is not an independent review');
+    comparisons.add(key);
     if (item.status !== 'PASS') add(gate, item.status, label + ': ' + item.observation);
   }
   // Review extraction/mapping first; converter diagnostics cannot certify their own input.
@@ -193,7 +209,7 @@ function checkDelivery(contractPath, reviewPath, PNG) {
   return { version: 1, status, technical: gateStatus('technical'), evidence: gateStatus('evidence'),
     preservation: contract.baseline ? gateStatus('preservation') : 'NOT_APPLICABLE',
     shapeReview: gateStatus('shape'), userAcceptance: 'NOT_ASSESSED',
-    limitation: 'Shape states validate recorded review coverage, not visual truth or automatic feature recognition.',
+    limitation: 'Shape states validate distinct, source-bound review records, not visual truth or automatic feature recognition.',
     contractSha256: sha(contractBytes), reviewSha256: sha(fs.readFileSync(reviewPath)), hashes,
     sourceSize: [source.width, source.height], native: stats, changes: preservation, savedEyeAudit, issues };
 }

@@ -75,4 +75,32 @@ test('invalid composed curve is rejected in favor of an independently audited so
   const broken=clone(result.image),p=result.report.pathCells[0];broken.data.writeUInt32BE(white,p*4);assert.equal(audit(broken,result.report).status,'FAIL');
  }finally{flow.layoutCurveFlow=original;}
 });
+test('confirmed stroke ownership releases a wrong material label inside its cross-section',()=>{
+ const W=48,H=48,step=4,source=new PNG({width:W,height:H}),labels=new PNG({width:W,height:H});
+ const grey=0x736b78ff,owners=new Int16Array(W*H).fill(-1);
+ for(let y=0;y<H;y++)for(let x=0;x<W;x++){
+  const inside=x>=8&&x<40&&y>=8&&y<40,edge=inside&&(x<15||x>=33||y<15||y>=33);
+  const fringe=edge&&(x===14||x===33||y===14||y===33),color=fringe?grey:edge?ink:inside?skin:white,p=y*W+x;
+  source.data.writeUInt32BE(color,p*4);labels.data.writeUInt32BE(color,p*4);
+  if(color===skin)owners[p]=0;if(fringe)owners[p]=1;
+ }
+ const b=require('./build-palette-native.cjs'),palette=parsePalette({colors:['#FFFFFF','#432443','#FFCC99','#736B78']}),base=b.buildNative(PNG,source,palette,12,12,'#FFFFFF','area-vote').image;
+ const material={owners,interior:new Map(),fillCells:new Map(),sourceFills:new Uint8Array(W*H),materialGroups:[0,1],plan:{regions:[{material:'skin'},{material:'provisional-grey'}]}};
+ const policy={layout:'joint-source-band',width:1,background:'#FFFFFF',backgroundTolerance:10,sourceStrokeColors:['#432443'],sourceInkRoles:[{name:'observed mixed pigment contour',color:'#432443',paletteColors:['#432443','#736B78'],kind:'stroke',observation:'Both source pigments belong to the same narrow border, not separate fill materials'}]};
+ const result=require('./raster-owned-stroke-bands.cjs').joint(PNG,source,base,palette,policy,material,{mask:new Uint8Array(W*H),cells:new Set()},labels);
+ requireAudit(audit(result.image,result.report));
+ assert.equal(result.report.unresolved.length,0);
+ for(let p=0;p<12*12;p++)assert.notEqual(result.image.data.readUInt32BE(p*4),grey,'A confirmed stroke pigment cannot remain as a parallel fill strip');
+ for(let y=4;y<8;y++)for(let x=4;x<8;x++)assert.equal(result.image.data.readUInt32BE((y*12+x)*4),skin);
+});
+test('a locally wide crossing cannot exempt its long thin branches from stroke width',()=>{
+ const source=new PNG({width:128,height:128}),palette=parsePalette({colors:['#FFFFFF','#432443']}),b=require('./build-palette-native.cjs');
+ for(let y=0;y<128;y++)for(let x=0;x<128;x++){const cross=x>=10&&x<118&&y>=60&&y<68||y>=10&&y<118&&x>=60&&x<68||(x-64)**2+(y-64)**2<144;source.data.writeUInt32BE(cross?ink:white,(y*128+x)*4);}
+ const base=b.buildNative(PNG,source,palette,32,32,'#FFFFFF','area-vote').image;
+ const policy={layout:'joint-source-band',width:1,background:'#FFFFFF',backgroundTolerance:10,sourceStrokeColors:['#432443'],sourceInkRoles:[{name:'crossed source seams',color:'#432443',kind:'mixed',observation:'Long narrow seam branches meet at a wider source junction'}]};
+ const result=require('./raster-owned-stroke-bands.cjs').joint(PNG,source,base,palette,policy,null,{mask:new Uint8Array(16384),cells:new Set()},source);
+ requireAudit(audit(result.image,result.report));
+ assert(result.report.pathCells.length>40,'The crossing must not hide long paths as fill');
+ assert(result.report.filledBranches.every(branch=>branch.sourcePoints.length<16),'A long seam is not a broad material region');
+});
 console.log(JSON.stringify({status:'PASS',checks}));

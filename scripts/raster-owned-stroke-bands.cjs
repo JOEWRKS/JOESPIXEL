@@ -81,7 +81,21 @@ function joint(PNG,source,base,palette,policy,material,features,sharedLabels,tra
  const surfaceMedial=new Set([...surfaceLayout.sourceDomain].map(p=>owner[p]).filter(p=>p>=0));
  for(const p of mask)if(surfaceMedial.has(owner[p])){surfaceLayout.sourceDomain.add(p);surfaceLayout.replaceCells.add(Math.floor(p/sw/step)*w+Math.floor(p%sw/step));}
  const explicitStroke=new Set((policy.sourceInkRoles??[]).filter(r=>r.kind==='stroke').map(r=>parseInt(r.color.slice(1)+'ff',16)));
- const narrow=new Set(),filledBranches=[];for(const branch of traceStrokePaths(skeleton,sw,sh,p=>[p%sw+.5,Math.floor(p/sw)+.5],1,0)){const points=new Set();for(let i=1;i<branch.length;i++)for(const[x,y]of rasterPath(branch[i-1],branch[i],false))points.add(y*sw+x);const radius=Math.max(...[...points].map(p=>depth[p]));if(![...points].some(p=>surfaceMedial.has(p))&&[...points].some(p=>!explicitStroke.has(strokePigment[p])&&depth[p]>step*2)){filledBranches.push({radius,sourcePoints:[...points]});continue;}for(const p of points)narrow.add(p);}const sourceBand=new Set([...mask].filter(p=>narrow.has(owner[p])));
+ const narrow=new Set(),filledBranches=[];
+ for(const branch of traceStrokePaths(skeleton,sw,sh,p=>[p%sw+.5,Math.floor(p/sw)+.5],1,0)){
+  const points=new Set();for(let i=1;i<branch.length;i++)for(const[x,y]of rasterPath(branch[i-1],branch[i],false))points.add(y*sw+x);
+  const ends=[branch[0],branch.at(-1)].map(([x,y])=>Math.floor(y)*sw+Math.floor(x));
+  const junctions=ends.filter(p=>adj(p,sw,sh,true).filter(q=>skeleton.has(q)).length>2);
+  // A junction widens the source cross-section locally. It cannot turn
+  // an entire long contour into fill and thereby exempt it from width QA.
+  // Measure the branch away from junction influence; a compact filled
+  // region without a junction still retains its actual measured radius.
+  const measured=[...points].filter(p=>!junctions.some(q=>(p%sw-q%sw)**2+(Math.floor(p/sw)-Math.floor(q/sw))**2<=(step*2)**2));
+  const radius=Math.max(0,...measured.map(p=>depth[p]));
+  if(![...points].some(p=>surfaceMedial.has(p))&&measured.some(p=>!explicitStroke.has(strokePigment[p])&&depth[p]>step*2)){filledBranches.push({radius,sourcePoints:[...points]});continue;}
+  for(const p of points)narrow.add(p);
+ }
+ const sourceBand=new Set([...mask].filter(p=>narrow.has(owner[p])));
  const rawPaths=traceStrokePaths(narrow,sw,sh,p=>[(p%sw+.5)/step,(Math.floor(p/sw)+.5)/step],1/step,.35);
  const flowTools=policy.curveFlow?require('./source-curve-flow.cjs'):null;
  // Protect gaps in the actual jointly assigned baseline, not only in the
@@ -113,17 +127,16 @@ function joint(PNG,source,base,palette,policy,material,features,sharedLabels,tra
  const sharedJunctionSupport=new Set([...sourceBand].map(p=>Math.floor(p/sw/step)*w+Math.floor(p%sw/step)));
  const sharedJunctionChanges=[];
  const resolveSharedJunctions=(input,record=true)=>{
-  if(!requiredSurfaceCells.size)return input;
   const set=new Set(input),signature=require('./source-curve-flow.cjs').topologySignature;
   const solidBlock=(mask,p)=>p%w+1<w&&p+w+1<n&&[p,p+1,p+w,p+w+1].every(q=>mask.has(q));
   for(const p of [...set]){
    if(!solidBlock(set,p))continue;
    const block=[p,p+1,p+w,p+w+1],movable=block.filter(q=>!requiredSurfaceCells.has(q)&&!locked.has(q));
-   if(!movable.length||movable.length===4)continue;
+   if(!movable.length)continue;
    const topology=[componentCount(set,true),componentCount(set,false)];
    // Keep the existing single-cell contraction when it can satisfy both
-   // topology and the required surface. Joint rerouting is only needed when
-   // that simpler validated operation cannot resolve this contact.
+   // topology and any required surface. Ordinary stroke junctions need the
+   // same source-supported joint routing when single-cell removal fails.
    if(movable.some(q=>{const trial=new Set(set);trial.delete(q);return componentCount(trial,true)===topology[0]&&componentCount(trial,false)===topology[1];}))continue;
    const x=p%w,y=Math.floor(p/w),box=[Math.max(0,x-2),Math.max(0,y-2),Math.min(w-1,x+3),Math.min(h-1,y+3)],before=signature(set,w,h,box);
    const additions=[...new Set(block.flatMap(q=>adj(q,w,h,true)))].filter(q=>!set.has(q)&&sharedJunctionSupport.has(q)&&!locked.has(q)&&!surfaceLayout.fills.has(q));
@@ -173,11 +186,23 @@ function joint(PNG,source,base,palette,policy,material,features,sharedLabels,tra
  }
  // Protected features keep their own source RGB/role processing. They are
  // neither fill seeds nor transit regions for a neighbouring contour owner.
- const fillOwner=new Int32Array(N).fill(-1),fillQ=[];for(let p=0;p<N;p++)if(fg[p]&&!sourceBand.has(p)&&!protectedSource(p)){fillOwner[p]=p;fillQ.push(p);}for(let i=0;i<fillQ.length;i++)for(const r of adj(fillQ[i],sw,sh))if(fg[r]&&!protectedSource(r)&&fillOwner[r]<0){fillOwner[r]=fillOwner[fillQ[i]];fillQ.push(r);}
+ // The color decision is already made. A vacated stroke cell may receive a
+ // source-side fill, but that fill cannot cross a declared material contract.
+ const mayFill=(seed,target)=>{
+  if(!material)return true;
+  // Once a source sample belongs to the narrow stroke's complete section,
+  // its earlier palette/material guess cannot wall off the vacated band.
+  // Actual observed fills are excluded from sourceBand above and remain
+  // subject to their material family and native fill obligations.
+  if(sourceBand.has(target))return true;
+  const a=material.owners[seed],b=material.owners[target];
+  return b<0 || a>=0&&material.materialGroups[a]===material.materialGroups[b];
+ };
+ const fillOwner=new Int32Array(N).fill(-1),fillQ=[];for(let p=0;p<N;p++)if(fg[p]&&!sourceBand.has(p)&&!protectedSource(p)){fillOwner[p]=p;fillQ.push(p);}for(let i=0;i<fillQ.length;i++)for(const r of adj(fillQ[i],sw,sh))if(fg[r]&&!protectedSource(r)&&fillOwner[r]<0&&mayFill(fillOwner[fillQ[i]],r)){fillOwner[r]=fillOwner[fillQ[i]];fillQ.push(r);}
  // Background-colored fringe is not an interior fill seed. The reference
  // and moved-curve allocators must agree here; otherwise the reference can
  // invent a cream pinhole that the curve allocator correctly refuses.
- const plainOwner=new Int32Array(N).fill(-1),plainQ=[];for(let p=0;p<N;p++)if(fg[p]&&!protectedSource(p)&&(!mask.has(p)&&!ink.has(colors[p])||sourceFill(p))&&colors[p]!==bg){plainOwner[p]=p;plainQ.push(p);}for(let i=0;i<plainQ.length;i++)for(const r of adj(plainQ[i],sw,sh))if(fg[r]&&!protectedSource(r)&&plainOwner[r]<0){plainOwner[r]=plainOwner[plainQ[i]];plainQ.push(r);}
+ const plainOwner=new Int32Array(N).fill(-1),plainQ=[];for(let p=0;p<N;p++)if(fg[p]&&!protectedSource(p)&&(!mask.has(p)&&!ink.has(colors[p])||sourceFill(p))&&colors[p]!==bg){plainOwner[p]=p;plainQ.push(p);}for(let i=0;i<plainQ.length;i++)for(const r of adj(plainQ[i],sw,sh))if(fg[r]&&!protectedSource(r)&&plainOwner[r]<0&&mayFill(plainOwner[plainQ[i]],r)){plainOwner[r]=plainOwner[plainQ[i]];plainQ.push(r);}
  // Write protection is not solid occupancy: a locked background cell remains
  // exterior space. It must not become a wall in foreground topology.
  // The jointly planned surface is foreground occupancy too. Partial edge
@@ -208,7 +233,7 @@ function joint(PNG,source,base,palette,policy,material,features,sharedLabels,tra
   curveInteriorOwner=new Int32Array(N).fill(-1);const q=[];
   const inside=p=>{const cell=Math.floor(Math.floor(p/sw)/step)*w+Math.floor(p%sw/step);return !outside[cell]&&!cells.has(cell);};
   for(let p=0;p<N;p++)if(inside(p)&&fg[p]&&!protectedSource(p)&&(!mask.has(p)&&!ink.has(colors[p])||sourceFill(p))&&colors[p]!==bg){curveInteriorOwner[p]=p;q.push(p);}
-  for(let i=0;i<q.length;i++)for(const p of adj(q[i],sw,sh))if(inside(p)&&!protectedSource(p)&&curveInteriorOwner[p]<0){curveInteriorOwner[p]=curveInteriorOwner[q[i]];q.push(p);}
+  for(let i=0;i<q.length;i++)for(const p of adj(q[i],sw,sh))if(inside(p)&&!protectedSource(p)&&curveInteriorOwner[p]<0&&mayFill(curveInteriorOwner[q[i]],p)){curveInteriorOwner[p]=curveInteriorOwner[q[i]];q.push(p);}
  }
  const out=new PNG({width:w,height:h});base.data.copy(out.data);for(const[p,c]of material?.fixedCells??[])out.data.writeUInt32BE(c,p*4);const restored=[],unresolved=[];
  const broadFillCells=[];for(const p of band){if(writeLocked.has(p)||cells.has(p))continue;const x=p%w,y=Math.floor(p/w);if(outside[p]){out.data.writeUInt32BE(bg,p*4);continue;}if(surfaceLayout.fills.has(p)){out.data.writeUInt32BE(surfaceLayout.fills.get(p),p*4);restored.push(p);continue;}let broadArea=0;for(let yy=y*step;yy<(y+1)*step;yy++)for(let xx=x*step;xx<(x+1)*step;xx++){const r=yy*sw+xx;if(mask.has(r)&&!sourceBand.has(r))broadArea++;}const useBroad=broadArea>step*step*.5;if(useBroad)broadFillCells.push(p);const votes=new Map();for(let yy=y*step;yy<(y+1)*step;yy++)for(let xx=x*step;xx<(x+1)*step;xx++){const r=yy*sw+xx,f=(useBroad?fillOwner:curveSweep.has(p)?curveInteriorOwner:plainOwner)[r];if(f>=0){const c=colors[f];votes.set(c,(votes.get(c)||0)+1);}}const winner=[...votes].sort((a,b)=>b[1]-a[1]||a[0]-b[0])[0]?.[0];if(winner===undefined){unresolved.push(p);continue;}out.data.writeUInt32BE(winner,p*4);restored.push(p);}

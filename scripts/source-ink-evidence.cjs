@@ -10,15 +10,18 @@ function reconcileSourceInk(source,mask,pigment,step,protectedSource){
   for(const[dx,dy]of directions){for(let r=2;r<=Math.ceil(step*2);r++){const ax=x+dx*r,ay=y+dy*r,bx=x-dx*r,by=y-dy*r;if(Math.min(ax,bx)<0||Math.max(ax,bx)>=w||Math.min(ay,by)<0||Math.max(ay,by)>=h)continue;const a=ay*w+ax,b=by*w+bx;if(Math.min(lum[a],lum[b])-lum[p]>=24&&Math.abs(lum[a]-lum[b])<95){ridge=true;break;}}if(ridge)break;}
   if(ridge)evidence.add(p);
  }
- const seedComponents=new Int32Array(N).fill(-1);let componentId=0;for(const start of mask)if(seedComponents[start]<0){const q=[start];seedComponents[start]=componentId;for(let i=0;i<q.length;i++)for(const p of near(q[i]))if(mask.has(p)&&pigment[p]===pigment[start]&&seedComponents[p]<0){seedComponents[p]=componentId;q.push(p);}componentId++;}
  const visited=new Set(),intervals=[],ambiguous=[];
  for(const start of evidence)if(!visited.has(start)){const part=[start],contacts=new Map();visited.add(start);for(let i=0;i<part.length;i++)for(const q of near(part[i])){if(mask.has(q)){const color=pigment[q];if(!contacts.has(color))contacts.set(color,new Set());contacts.get(color).add(q);}else if(evidence.has(q)&&!visited.has(q)){visited.add(q);part.push(q);}}
-  const ranked=[...contacts].map(([color,set])=>({color,set,count:set.size})).sort((a,b)=>b.count-a.count),best=ranked[0];if(!best||best.count<2||new Set([...best.set].map(p=>seedComponents[p]).filter(v=>v>=0)).size<2)continue;
+  const ranked=[...contacts].map(([color,set])=>({color,set,count:set.size})).sort((a,b)=>b.count-a.count),best=ranked[0];if(!best||best.count<2)continue;
   // Keep endpoints/branches of different materials separate. A tiny fringe
   // contact does not override two-sided support from the dominant source line.
   if(ranked[1]&&ranked[1].count>best.count*.25){ambiguous.push({pixels:part.length,colors:ranked.map(x=>x.color)});continue;}
   const pts=[...best.set],xs=pts.map(p=>p%w),ys=pts.map(p=>Math.floor(p/w));if(Math.max(Math.max(...xs)-Math.min(...xs),Math.max(...ys)-Math.min(...ys))<2)continue;
-  const groups=new Map();for(const p of pts){const id=seedComponents[p];if(id<0)continue;if(!groups.has(id))groups.set(id,[]);groups.get(id).push(p);}
+  // Count separate contacts at this uncertainty interval, not global line
+  // components. Both ends of a gap in a closed contour already belong to
+  // one component via the opposite side; that is not one-sided evidence.
+  const groups=new Map(),pending=new Set(pts);while(pending.size){const q=[pending.values().next().value];pending.delete(q[0]);for(let i=0;i<q.length;i++)for(const p of near(q[i]))if(pending.delete(p))q.push(p);groups.set(groups.size,q);}
+  if(groups.size<2)continue;
   const allowed=new Set(part),bridges=new Set(),anchors=[];const entries=[...groups];
   for(let a=0;a<entries.length;a++)for(let b=a+1;b<entries.length;b++){
    const ends=new Set(entries[b][1]),parents=new Map(),q=[];for(const p of entries[a][1])for(const n of near(p))if(allowed.has(n)&&!parents.has(n)){parents.set(n,{previous:p,length:1});q.push(n);}let finish=null;
@@ -30,6 +33,21 @@ function reconcileSourceInk(source,mask,pigment,step,protectedSource){
   }
   if(!bridges.size)continue;for(const p of bridges){mask.add(p);pigment[p]=best.color;}intervals.push({color:best.color,sourcePixels:[...bridges],anchors});
  }
- return {version:1,executed:true,method:'source-ridge-role-continuity',intervals,ambiguous,addedSourcePixels:intervals.reduce((n,r)=>n+r.sourcePixels.length,0)};
+ // Own a one-source-pixel antialias fringe with the stroke before palette
+ // assignment turns that mixed sample into a second grey/material line.
+ // This is not dilation: require an actual collinear ink -> mixture -> fill
+ // ramp, keep explicit fills/features protected, and never grow iteratively.
+ const fringe=new Map(),original=new Set(mask),axes=[[1,0],[-1,0],[0,1],[0,-1]];
+ for(const a of original){const ax=a%w,ay=Math.floor(a/w);for(const[dx,dy]of axes){
+  const x=ax+dx,y=ay+dy,p=y*w+x,bx=x+dx,by=y+dy;
+  if(x<0||x>=w||y<0||y>=h||bx<0||bx>=w||by<0||by>=h||original.has(p)||protectedSource(p))continue;
+  const b=by*w+bx;if(original.has(b)||lum[b]-lum[a]<60||lum[p]<=lum[a]+8||lum[p]>=lum[b]-8)continue;
+  const av=[...source.data.subarray(a*4,a*4+3)],pv=[...source.data.subarray(p*4,p*4+3)],bv=[...source.data.subarray(b*4,b*4+3)];
+  const v=av.map((c,i)=>c-bv[i]),den=v.reduce((s,c)=>s+c*c,0),t=pv.reduce((s,c,i)=>s+(c-bv[i])*v[i],0)/den;
+  if(t<.25||t>.9||Math.sqrt(pv.reduce((s,c,i)=>s+(c-bv[i]-t*v[i])**2,0))>8)continue;
+  const old=fringe.get(p),color=pigment[a];fringe.set(p,old!==undefined&&old!==color?0:color);
+ }}
+ const fringeSourcePixels=[];for(const[p,color]of fringe)if(color){mask.add(p);pigment[p]=color;fringeSourcePixels.push(p);}
+ return {version:1,executed:true,method:'source-ridge-role-continuity',intervals,ambiguous,fringeSourcePixels,addedSourcePixels:intervals.reduce((n,r)=>n+r.sourcePixels.length,0)+fringeSourcePixels.length};
 }
 module.exports={reconcileSourceInk};

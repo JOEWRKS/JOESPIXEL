@@ -16,7 +16,7 @@ function inside(x,y,polygon){let result=false;for(let i=0,j=polygon.length-1;i<p
 }return result;}
 function compile(PNG,source,palette,width,height,plan,policies){
  const sw=source.width,sh=source.height,cell=sw/width;
- need(plan?.version===1&&Object.keys(plan).every(k=>['version','sourcePixelsSha256','paletteColors','grid','boundaryPolicySha256','observation','regions','protectedFeatures','inventory','unassigned','surfaces','preserveOutside'].includes(k)),'unsupported plan fields');
+ need(plan?.version===1&&Object.keys(plan).every(k=>['version','sourcePixelsSha256','paletteColors','grid','boundaryPolicySha256','observation','regions','protectedFeatures','inventory','unassigned','surfaces','preserveOutside','roleWitnesses'].includes(k)),'unsupported plan fields');
  need(text(plan.observation)&&plan.sourcePixelsSha256===hash(source.data),'source pixels changed');
  need(JSON.stringify(plan.paletteColors)===JSON.stringify(palette.map(p=>p.hex)),'palette changed');
  need(Number.isInteger(cell)&&cell>0&&sh/height===cell&&JSON.stringify(plan.grid)===JSON.stringify({native:[width,height],cell,canvas:[sw,sh],origin:[0,0]}),'fixed uniform grid changed');
@@ -84,7 +84,7 @@ function compile(PNG,source,palette,width,height,plan,policies){
   const members=plan.regions.filter(r=>s.regionIds.includes(r.id)),signature=r=>JSON.stringify([r.material,[...r.colors].sort(),r.baseColor]);
   need(members.every(r=>signature(r)===signature(members[0])),'one surface cannot merge different material contracts');
  }
- const owners=new Int16Array(sw*sh).fill(-1),exceptions=new Uint8Array(sw*sh),sourceExceptions=new Uint8Array(sw*sh),map=new PNG({width:sw,height:sh});
+ const owners=new Int32Array(sw*sh).fill(-1),exceptions=new Uint8Array(sw*sh),sourceExceptions=new Uint8Array(sw*sh),map=new PNG({width:sw,height:sh});
  // A feature owns every logical cell it touches. Protecting only part of a
  // source cell would still let area voting change the feature's boundary.
  const forms=(policies.formPolicy?.features??[]).filter(f=>f.kind==='stroke');
@@ -104,6 +104,16 @@ function compile(PNG,source,palette,width,height,plan,policies){
    }
   }
  });
+ // Source witnesses check semantic coverage independently of region existence.
+ // A reviewed forehead cannot silently become hair merely because skin exists elsewhere.
+ need(plan.roleWitnesses===undefined||Array.isArray(plan.roleWitnesses),'invalid role witnesses');
+ for(const witness of plan.roleWitnesses??[]){
+  need(Object.keys(witness).every(k=>['material','points','connected','observation'].includes(k))&&text(witness.material)&&text(witness.observation)&&typeof witness.connected==='boolean'&&Array.isArray(witness.points)&&witness.points.length>0,'invalid role witness');
+  need(witness.points.every(p=>Array.isArray(p)&&p.length===2&&p.every(Number.isInteger)&&p[0]>=0&&p[0]<sw&&p[1]>=0&&p[1]<sh),'role witness must use source coordinates');
+  const owns=q=>owners[q]>=0&&plan.regions[owners[q]].material===witness.material;
+  const targets=witness.points.map(([x,y])=>y*sw+x);need(targets.every(q=>owns(q)&&!sourceExceptions[q]),'observed material coverage missing: '+witness.material);
+  if(witness.connected){const seen=new Set([targets[0]]),queue=[targets[0]];for(let i=0;i<queue.length&&!targets.every(q=>seen.has(q));i++){const q=queue[i],x=q%sw,y=Math.floor(q/sw);for(const p of [x?q-1:-1,x+1<sw?q+1:-1,y?q-sw:-1,y+1<sh?q+sw:-1])if(p>=0&&!seen.has(p)&&owns(p)&&!sourceExceptions[p]){seen.add(p);queue.push(p);}}need(targets.every(q=>seen.has(q)),'observed material connection missing: '+witness.material);}
+ }
  // Only an observed connected surface joins its observation fragments.
  // Equal colors/material alone do not prove two objects share one surface.
  const groups=new Map(),regionGroups=plan.regions.map(r=>{
@@ -111,11 +121,22 @@ function compile(PNG,source,palette,width,height,plan,policies){
   const key=surface?'surface:'+surface.id:'region:'+r.id;
   if(!groups.has(key))groups.set(key,groups.size);return groups.get(key);
  });
- const interior=new Map();
+ // Color compatibility is not object connectivity. Fragment IDs must not
+ // change palette assignment or make an otherwise uniform cell unprotected.
+ // Only explicit surfaces request a shared geometric perimeter.
+ const families=new Map(),materialGroups=plan.regions.map(r=>{
+  const key=JSON.stringify([r.material,[...r.colors].sort(),r.baseColor]);
+  if(!families.has(key))families.set(key,families.size);return families.get(key);
+ });
+ const interior=new Map(),colorInterior=new Map();
  for(let y=0;y<height;y++)for(let x=0;x<width;x++){
-  let owner=owners[y*cell*sw+x*cell],complete=owner>=0;
-  for(let yy=y*cell;yy<(y+1)*cell;yy++)for(let xx=x*cell;xx<(x+1)*cell;xx++)if(owners[yy*sw+xx]<0||regionGroups[owners[yy*sw+xx]]!==regionGroups[owner]||exceptions[yy*sw+xx])complete=false;
-  if(complete){const p=y*width+x;interior.set(p,owner);}
+  const owner=owners[y*cell*sw+x*cell];let complete=owner>=0,geometric=complete;
+  for(let yy=y*cell;yy<(y+1)*cell;yy++)for(let xx=x*cell;xx<(x+1)*cell;xx++){
+   const q=yy*sw+xx,id=owners[q];
+   if(id<0||materialGroups[id]!==materialGroups[owner]||exceptions[q])complete=false;
+   if(id<0||regionGroups[id]!==regionGroups[owner]||exceptions[q])geometric=false;
+  }
+  const p=y*width+x;if(complete)colorInterior.set(p,owner);if(geometric)interior.set(p,owner);
  }
  for(let p=0;p<owners.length;p++)map.data.set(exceptions[p]?[255,255,255,255]:owners[p]>=0?[53+(regionGroups[owners[p]]*73)%170,137,190,255]:[65,65,65,255],p*4);
  const sourceFills=new Uint8Array(sw*sh);
@@ -130,28 +151,23 @@ function compile(PNG,source,palette,width,height,plan,policies){
   if(!votes.has(key))votes.set(key,{count:0,colors:r.colors});votes.get(key).count++;
  }
  for(const[p,votes]of fillVotes)for(const vote of votes.values())if(vote.count>cell*cell/2)fillCells.set(p,vote.colors);
- return {plan,owners,regionGroups,exceptions,sourceExceptions,sourceFills,fillCells,interior,map,fixedCells,preservedOutline};
+ return {plan,owners,regionGroups,materialGroups,exceptions,sourceExceptions,sourceFills,fillCells,interior,colorInterior,map,fixedCells,preservedOutline};
 }
-function assignSource(PNG,source,segmented,palette,compiled){
- const {toLab}=require('./build-palette-native.cjs'),out=new PNG({width:source.width,height:source.height});segmented.data.copy(out.data);
- const choices=compiled.plan.regions.map(r=>r.colors.map(hex=>{const p=palette.find(p=>p.hex===hex);return {rgb:p.rgb,lab:toLab(p.rgb)};}));
- const cache=new Map();let assignedPixels=0;
- for(let p=0;p<compiled.owners.length;p++){
-  // Protect the feature's exact source samples during color assignment. Its
-  // whole touched grid cell stays protected later through exceptions/interior.
-  // Expanding this source exclusion to a grid cell leaves adjacent face color
-  // unassigned and can turn a white clearance into background in the area vote.
-  const role=compiled.owners[p];if(role<0||compiled.sourceExceptions[p])continue;
-  const raw=source.data.readUInt32BE(p*4),key=role+':'+raw;let rgb=cache.get(key);
-  if(!rgb){const lab=toLab([...source.data.subarray(p*4,p*4+3)]);let best=Infinity;for(const c of choices[role]){const d=c.lab.reduce((s,v,i)=>s+(v-lab[i])**2,0);if(d<best){best=d;rgb=c.rgb;}}cache.set(key,rgb);}
-  out.data.set([...rgb,255],p*4);assignedPixels++;
+function audit(image,compiled,boundaryAllocations=new Map()){
+ let violations=0;const counts={},invalidColors=[],boundaryTransfers=[];for(const [p,id]of compiled.colorInterior){
+  const r=compiled.plan.regions[id],value=image.data.readUInt32BE(p*4),color='#'+image.data.subarray(p*4,p*4+3).toString('hex').toUpperCase();
+  if(!r.colors.includes(color)){
+   const change={cell:p,region:r.id,material:r.material,color};
+   // A color-family obligation does not freeze an unobserved object edge.
+   // Only a verified joint boundary allocation may transfer such a cell.
+   // Geometric interiors and explicit fills remain hard obligations.
+   if(!compiled.interior.has(p)&&!compiled.fillCells.has(p)&&boundaryAllocations.get(p)===value)boundaryTransfers.push(change);
+   else{violations++;invalidColors.push(change);}
+  }
+  counts[r.id]=(counts[r.id]||0)+1;
  }
- return {image:out,report:{assignedPixels,interiorCells:compiled.interior.size,regions:compiled.plan.regions.map(r=>({id:r.id,material:r.material,colors:r.colors})),method:'source-material-ownership-before-area-assignment'}};
-}
-function audit(image,compiled){
- let violations=0;const counts={};for(const [p,id]of compiled.interior){const r=compiled.plan.regions[id],color='#'+image.data.subarray(p*4,p*4+3).toString('hex').toUpperCase();if(!r.colors.includes(color))violations++;counts[r.id]=(counts[r.id]||0)+1;}
  const lostFillCells=[];for(const[p,colors]of compiled.fillCells??[]){const color='#'+image.data.subarray(p*4,p*4+3).toString('hex').toUpperCase();if(!colors.includes(color))lostFillCells.push(p);}
  let changedPreservedPixels=0;for(const[p,c]of compiled.fixedCells??[])if(image.data.readUInt32BE(p*4)!==c)changedPreservedPixels++;
- return {violations:violations+changedPreservedPixels+lostFillCells.length,changedPreservedPixels,checkedPreservedCells:compiled.fixedCells?.size??0,checkedInteriorCells:compiled.interior.size,checkedFillCells:compiled.fillCells?.size??0,lostFillCells,counts,visualTruth:'NOT_AUTOMATICALLY_DETERMINED'};
+ return {violations:violations+changedPreservedPixels+lostFillCells.length,invalidColors,boundaryTransfers,changedPreservedPixels,checkedPreservedCells:compiled.fixedCells?.size??0,checkedInteriorCells:compiled.colorInterior.size,checkedGeometricInteriorCells:compiled.interior.size,checkedFillCells:compiled.fillCells?.size??0,lostFillCells,counts,visualTruth:'NOT_AUTOMATICALLY_DETERMINED'};
 }
-module.exports={readPlan,compile,assignSource,audit,policyHash};
+module.exports={readPlan,compile,audit,policyHash};

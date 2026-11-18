@@ -35,6 +35,25 @@ test('names do not change rasterization, malformed destination fields are reject
 test('clipped or absent mandatory source strokes remain unresolved, not fabricated',()=>{
  const source=fill(128,64,skin),base=fill(16,8,skin);const missing=allocateRequiredForms(PNG,source,base,grid,palette,policy([feature]));assert.deepEqual(missing.report.unresolved,[feature.name]);assert(missing.image.data.equals(base.data));
  rect(source,8,25,40,2,ink);const clipped=allocateRequiredForms(PNG,source,base,grid,palette,policy([feature]));assert.equal(clipped.report.features[0].action,'search-region-clips-source');
+ assert.deepEqual(clipped.report.features[0].edges,['left']);
+});
+test('an adjacent colour missing from contextSamples is named as the clipping edge',()=>{
+ // Mouth-like fixture: a dark line sits on a lip tone darker than skin. With
+ // only skin as context the lip is classified as ink and reaches the window.
+ const lip=0x763f36ff,source=fill(128,64,skin),base=fill(16,8,skin);rect(source,8,28,64,12,lip);rect(source,20,30,32,2,ink);
+ const region=[12,20,50,16],line={...feature,sourceRegion:region};
+ const skinOnly=allocateRequiredForms(PNG,source,base,grid,palette,policy([line]));
+ assert.equal(skinOnly.report.features[0].action,'search-region-clips-source');assert.deepEqual(skinOnly.report.features[0].edges,['left','right','bottom']);
+ assert.throws(()=>buildNative(PNG,source,palette,16,8,'#FFF7E6','area-vote',null,null,null,null,policy([line])),/search-region-clips-source at left\/right\/bottom edge/);
+ const both=allocateRequiredForms(PNG,source,base,grid,palette,policy([{...line,contextSamples:[[197,131,78],[118,63,54]]}]));
+ assert.deepEqual(both.report.unresolved,[]);
+});
+
+test('conversion stops at a missing required form before later passes can look successful',()=>{
+ const source=fill(128,64,skin),stages=[];
+ assert.throws(()=>buildNative(PNG,source,palette,16,8,'#FFF7E6','area-vote',null,null,null,null,policy([feature]),null,null,e=>stages.push(e.stage)),/Required source forms unresolved/);
+ assert(stages.includes('required-forms'),'Keep evidence of the failing stage');
+ assert(!stages.includes('eye-placement'),'Do not continue after a required form failure');
 });
 test('two comparable source marks are not silently collapsed into one required feature',()=>{
  const source=fill(128,64,skin),base=fill(16,8,skin);rect(source,16,20,40,2,ink);rect(source,16,35,40,2,ink);

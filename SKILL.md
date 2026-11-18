@@ -1,11 +1,11 @@
 ---
-name: joewrks-pixel-art
+name: joespixel
 description: "Generate, edit and verify pixel artwork from the user's concept and references. Use for pixel characters, portraits, props, icons, environments and sprites requiring a fixed grid, palette, one-dot contours and direct saved-image review; not ordinary UI layout or general illustration."
 metadata:
-  version: "2.23.9"
+  version: "2.24.0"
 ---
 
-# JOEWRKS Pixel Art
+# JOESPIXEL
 
 작업 전 [제작 절차](references/workflow.md)를 읽고, 실행 파일을 만들 때 [입력 계약](references/input-contract.md)을 확인한다.
 
@@ -26,7 +26,7 @@ metadata:
 
 ## 최초 설치 준비
 
-저장소 루트가 스킬이다. 설치 도구에는 `--path . --name joewrks-pixel-art`를 전달하여 폴더명을 자동 지정한다. 사용자가 폴더 이름을 바꾸거나 터미널을 직접 조작하게 하지 않는다. Node.js 20 이상을 확인하고 스킬 폴더에서 `npm ci --ignore-scripts`로 잠긴 의존성을 설치한다. 실행 환경이 없으면 완료로 보고하지 않는다. 이미지 생성은 Codex의 사용 가능한 이미지 도구를 사용한다.
+저장소 루트가 스킬이다. 설치 도구에는 `--path . --name joespixel`을 전달하여 폴더명을 자동 지정한다. 사용자가 폴더 이름을 바꾸거나 터미널을 직접 조작하게 하지 않는다. Node.js 20 이상을 확인하고 스킬 폴더에서 `npm ci --ignore-scripts`로 잠긴 의존성을 설치한다. 실행 환경이 없으면 완료로 보고하지 않는다. 이미지 생성은 Codex의 사용 가능한 이미지 도구를 사용한다.
 
 ## 최우선 판단
 
@@ -55,7 +55,8 @@ metadata:
 - 피부는 관찰된 밝음/기본/어두움 중 최대 3색이며 기본 면을 보존한다. 볼터치는 별도 역할로 적절한 색을 쓰거나 생략한다. 음영 배치와 광원을 임의 변경하지 않는다.
 - 눈은 원본에 있는 구성과 관계를 따른다. 눈썹·속눈썹·눈 테두리의 접촉/근접/분리를 관찰하며, 역할이 다르다는 이유로 흰 틈을 강제하거나 간격을 늘리지 않는다. 반사나 선 분리를 위해 눈의 비율·기울기·상부 형태를 바꾸지 않는다. 코/입의 형태와 음영, 손의 피부 면/굽힘/틈/접촉도 함께 판단한다.
 - 목적지 도트 지정, 수동 덧칠, 캐릭터 전용 분기, 실행 중 샘플러 교체는 금지한다. 원본 좌표의 관찰 영역만 허용한다. 사용자 고정 조건 변경에는 별도 지시가 필요하다.
-- 연결 면은 관찰 조각의 ID나 색의 동일성으로 추정하지 않고 `surfaces`에 명시한다. 부분 수정의 `preserveOutside`는 동일 원안의 기준본·실행 기록에 묶으며, 쓰기 보호를 기하 장애물 또는 선 검사의 면제로 사용하지 않는다. 피부 면·경계·인접 선 접합부의 의무를 저장 PNG에서 함께 검증한다.
+- 재질의 허용색과 물체의 연결 면은 별개다. 허용색은 관찰 조각 ID와 무관하게 지키고, 공동 윤곽이 필요한 연결 면만 `surfaces`에 명시한다. 부분 수정의 `preserveOutside`는 동일 원안의 기준본·실행 기록에 묶으며, 쓰기 보호를 기하 장애물 또는 선 검사의 면제로 사용하지 않는다.
+- 색 면은 재질 제약 아래 한 번 결정한다. 눈·입 주변과 선 이동 후 채움도 이 결과를 사용하며 원본 RGB로 다시 칠하지 않는다. 선의 배치가 면을 이동시키면 실제 경계 배정 기록과 색·연결 검사를 함께 남긴다. 앞서 배정한 필수 특징을 뒤 단계가 덮으면 해당 단계에서 중단한다.
 - 외곽선색과 겹치는 관절·옷·음영의 채움 면은 원본에서 확인한 영역에 `geometry: fill`을 배정한다. 폭이 좁다는 이유로 면을 선으로 바꾸지 않는다. 면의 색·연결 검수와 주변 1도트 선 검수는 모두 유지한다.
 - 재질 배정 전에 원본의 물체 소속과 가림 순서를 확인한다. 전경 구조물을 팔 보호대로 오인한 초안은 색면 보호로 해결하지 않고 생성 원안에서 고친다. 부분 원안 편집의 범위 밖 보존은 이전·현재 원안의 실제 픽셀 동일성을 검증한 새 계약으로만 허용한다.
 

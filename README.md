@@ -15,7 +15,7 @@ https://github.com/JOEWRKS/JOESPIXEL 의 스킬을 설치하고 실행 준비까
 설치 후 원본 이미지를 첨부하고 요청하세요.
 
 ```text
-$joewrks-pixel-art 이 이미지로 픽셀 아트 만들어줘.
+$joespixel 이 이미지로 픽셀 아트 만들어줘.
 ```
 
-[설치 파일 다운로드](https://github.com/JOEWRKS/JOESPIXEL/releases/latest/download/joewrks-pixel-art.zip)
+[스킬 파일 다운로드](https://github.com/JOEWRKS/JOESPIXEL/archive/refs/heads/main.zip)

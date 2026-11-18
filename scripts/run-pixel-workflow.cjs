@@ -81,7 +81,7 @@ function prepare(jobPath, outputDir, PNG) {
     materialReport:built.materialReport??null,structureReport:built.structureReport??null,sourceRegionReport:built.sourceRegionReport??null,shapeRasterReport:built.shapeRasterReport??null,eyePolicyReport:built.eyePolicyReport,formReport:built.formReport??null,outlineReport:built.outlineReport??null,
     savedEyeAudit:require('./eye-plane-policy.cjs').auditEyePolicy(PNG,source,saved,palette,contract.eyePolicy,require('./eye-plane-policy.cjs').affineEyeGrid(source,saved,fit),built.materialContext),manualOutputEdits:0};
   write(path.join(outputDir,'run.json'),manifest);
-  const pending=()=>({status:'UNVERIFIED',observation:'Direct comparison of saved PNG against source required.',evidence:[]});
+  const pending=()=>({status:'UNVERIFIED',observation:'Direct comparison of saved PNG against source required.',evidence:[],comparison:{sourceRegion:null,difference:'',criterion:'',reason:''}});
   write(path.join(outputDir,'review.pending.json'),{version:1,reviewer:'',contractSha256:manifest.contract.sha256,
     native,expanded,evidence:[],sourceReview:pending(),eyeReview:{flatColors:pending(),shape:pending(),reflection:pending()},features:[...contract.features.map(f=>f.id),'$whole'].map(id=>({id,clarity:pending(),fidelity:pending()})),
     views:{native:pending(),zoom:pending(),display:pending()},

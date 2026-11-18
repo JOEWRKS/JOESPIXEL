@@ -10,6 +10,8 @@
 
 `source-path`의 필수 열린 선에는 `feature.curve`가 필요하다: `{version:1, axis:"y", observation:"원본 형태 관찰", landmarks:[...]}`. `axis`는 굽힘 높이를 비교할 원본 축(`x` 또는 `y`)이다. 각 landmark는 `{name, kind, sourceRegion:[x,y,w,h]}`이며, 처음/마지막은 `endpoint`, 중간은 해당 축의 `min`(봉우리) 또는 `max`(굽힘)다. 창은 원본의 의미 있는 지점을 둘러싸며 목적지 도트나 강제 출력 폭을 입력하지 않는다. 바닥 폭은 원본에서 계산한다. 양끝은 관찰된 선 끝까지 유지하고, 중간 굽힘 후보는 원본 잉크 안에서 한 논리 칸 거리 이내로 공동 선택한다. 보고서의 선택 위치·원본 대비 이동·곡선 순서를 직접 검수한다. 닫힌 눈 테두리·동공 면·입 내부 색면을 이 열린 선 방식에 넣지 않는다. 기존 필수 `source-path` 입력도 새 실행 전 이 관찰을 추가해야 하며, 누락 시 자동 보호로 대체하지 않는다.
 
+선 화소는 `samples`와 `contextSamples` 중 가까운 쪽으로 분류한다. 따라서 `contextSamples`에는 검색 창 안에서 선에 닿는 **모든 비선 색**을 넣는다. 입 선이면 피부와 함께 위·아래 입술 색을 모두 넣는다. 피부보다 어두운 입술 색이 빠지면 입술 면이 선으로 분류되어 창 가장자리까지 이어지고 `search-region-clips-source`로 중단된다. 그리고 `sourceRegion`은 선 성분의 사방에 비선 화소를 최소 1원본 화소 이상 남겨야 한다. 보고서의 `edges`가 닿은 가장자리를 알려 준다. 그 방향에 실제 선이 이어지면 창을 넓히고, 선이 창 안에서 끝나는데도 닿았다면 그 쪽의 인접 색을 `contextSamples`에 추가한다. 창을 줄여 다른 면을 잘라내는 방식으로 통과시키지 않는다.
+
 에이전트가 관찰 입력과 단계 증거를 준비한 뒤 스킬 폴더에서 실행한다.
 
 ```text
@@ -76,6 +78,8 @@ node scripts/run-pixel-workflow.cjs verify /absolute/path/new-run
 - `applyEyePolicy`가 반환한 `sourceRoleMap`을 실제 원안과 먼저 대조한다. 위쪽 속눈썹까지 눈 소유 영역에 들어가는지, 홍채 경계·동공·반사가 올바른 역할인지 확인한다. 원본 관찰 경로이며 목적지 도트 지정이나 자동 해부학 인식이 아니다. 단순한 점눈도 관찰된 하나의 형태로 명시하며 홍채를 새로 만들지 않는다.
 - 중앙 동공과 홍채 가장자리가 같은 어두운 색이면 RGB 표본만으로 구별하지 않는다. 관찰된 중앙 영역과 주변 홍채를 겹치지 않는 소스 `partitions`로 나누고, 동공 역할은 실제 중앙 영역에서만 허용한다. 색의 존재와 별개로 원본의 동공 위치·홍채 비율을 비교한다.
 
+원본에서 확인한 축 방향의 조밀한 타원 동공에는 보호된 `fill` 역할에 `shape: "source-oval"`을 지정할 수 있다. 원본 역할 마스크의 폭·높이·중심을 공동 배치하며 흰자·반사·다른 보호 역할을 침범하거나 중심을 축별 반 칸 이상 이동해야 하면 차단한다. 모든 눈을 타원으로 강제하는 옵션이 아니며 원안 관찰 없이 사용하지 않는다.
+
 ### 외곽선
 
 `outlinePolicy`의 필수 골격:
@@ -102,6 +106,8 @@ node scripts/run-pixel-workflow.cjs verify /absolute/path/new-run
 
 위 색은 예시다. 실제 초안의 선 색과 관찰을 사용한다. `kind: mixed`는 같은 색의 넓은 채움과 좁은 선을 구분해야 하는 경우다. 선택적 `sourceRect`도 원본 공간이다. `sourceStrokeColors`는 선언한 역할의 대표색과 정확히 일치해야 하며 한 안료를 두 역할에 중복 배정하지 않는다. `colors`에는 선 역할 밖의 관찰된 어두운 실루엣 재질이 포함될 수 있으나 근거 없이 추가하면 안 된다.
 
+`joint-source-band`는 `formPolicy`의 필수 선을 소유권으로 받아 함께 배치하므로 `mode`가 필요 없다. 사용하지 않는 `mode`를 통과용으로 넣지 않는다. `mode: "source-silhouette-width"`는 `layout`이 없는 구 외곽선 경로에서만 필수 선과 함께 요구된다.
+
 검사 범위는 선언된 원본 선 영역이다. `outsideDeclaredBand`를 전체 외곽선 검사 완료로 해석하지 않는다. 실제 선 누락·곡선 흐름·색면의 외부 노출을 초안과 별도로 비교한다.
 
 ### 재질
@@ -116,6 +122,8 @@ node scripts/run-pixel-workflow.cjs verify /absolute/path/new-run
 - `regions`: `{id, material, polygon, colors, baseColor, boundaryRoles, observation, geometry?}`. 원본 다각형 중복 금지, 피부 최대 3색, 기본색 필수. `geometry: "fill"`은 선과 같은 색을 쓰는 **실제 채움 면**을 원본 좌표에서 명시한다. 배경·선 역할과 중복 지정할 수 없으며 `joint-source-band`에서만 지원한다. 해당 표본은 선 추출·연결 복구·접촉선 탐색의 잉크로 쓰지 않고 재질 면적 배정에 사용한다. 한 칸의 과반을 차지하는 명시 면은 저장본의 허용 재질색도 검사한다. 주변 윤곽 검사는 면제하지 않는다.
 - `protectedFeatures`: `{role, rect, sourcePolygon?, observation}`. 눈 다각형과 동일한 보호 형태를 사용한다.
 - `inventory`: `{id, decision: assigned|preserved|absent, regionIds, observation}`. 전체 부위를 확인하며 미확인을 preserved로 바꾸지 않는다.
+
+관찰한 재질의 누락을 막으려면 `roleWitnesses: [{material, points:[[sourceX,sourceY],...], connected:true|false, observation}]`를 기록한다. 얼굴은 이마 위쪽과 아래쪽·볼·턱처럼 같은 피부 면에 속하는 실제 소스 지점을 포함한다. 지정 지점의 재질 배정이 빠졌거나 연결 조건이 깨지면 격자 배치 전에 중단한다. 이 검사는 지정한 소스 관찰 근거를 확인하며 자동 해부학 인식이나 전체 시각 검수를 대신하지 않는다.
 
 `compile(PNG, source, palette, width, height, plan, policies)`가 만든 `map`을 PNG로 저장하고 원본과 직접 비교한다. 분류가 잘못되면 계획을 고친 뒤 재생성한다. 최종 픽셀을 칠하여 계획 오류를 숨기지 않는다.
 
@@ -138,14 +146,18 @@ node scripts/run-pixel-workflow.cjs verify /absolute/path/new-run
 
 `prepare`의 `review.pending.json`을 별도 파일로 복사해 직접 관찰한 내용을 채운다. 최종 `stageChecks`에는 1–7단계를 넣으며 1–4단계는 실행 시점 계약과 같아야 한다. `gridDraft.native/expanded/grid`는 pending의 실제 격자 초안과 일치해야 한다. `gridDraft.sourceComparison`에는 원안에서 달라진 선 폭·형태·생략을, `gridDraft.visual`에는 격자 초안의 실제 외곽선·필수 형태 검수를 각각 기록한다. 두 관찰은 다른 시각 검사처럼 `{status, observation, evidence}` 형식이며 누락·미달이면 잠글 수 없다.
 
-`native/expanded`는 현재 후보 파일의 경로·해시다. `evidence` 항목에는 `id`, 파일 증거, `bindings: {source, native, baseline?}` 해시를 넣는다. `sourceReview`, `features`의 `clarity/fidelity`, `views.native/zoom/display` 관찰은 유효한 evidence ID를 인용해야 한다. 전체 이미지 항목 ID는 `$whole`이다.
+`native/expanded`는 현재 후보 파일의 경로·해시다. `evidence` 항목에는 `id`, 파일 증거, `bindings: {source, native, baseline?}` 해시를 넣는다. 전체 이미지 항목 ID는 `$whole`이다.
+
+최종 검수의 각 관찰은 `{status, observation, evidence, comparison}`을 가진다. `comparison`은 `{sourceRegion:[x,y,w,h], difference, criterion, reason}`이며 실제 원안 좌표, 관찰한 차이, 적용 기준, 판정 이유를 각각 적는다. `sourceReview`, 격자 비교, 눈 검사, 특징의 clarity/fidelity·외곽선 검사, 실제 표시 크기와 결함 해결 기록에 같은 형식을 적용한다. 증거 ID는 현재 원안·출력에 결속되어야 한다. 누락된 비교와 동일 비교문 복사로 만든 중복 검수는 잠금을 차단한다. 이 구조 검사가 관찰 내용의 진실을 자동 판정하는 것은 아니다.
 
 보이는 눈은 `eyeReview.flatColors/shape/reflection`, 1도트 선은 `outline` 특징의 `boundary.continuity/thickness/staircase/colorSeparation`을 각각 검수한다. `findings`에서 결함이 `RESOLVED`이면 새 `verification`이 필요하다. `OPEN` 또는 미검증은 잠금과 납품 차단 사유다. `lock` 이후 검수 파일도 변경할 수 없다. 저장 후 확인한 `draftPreservation`은 잠긴 격자 초안과 최종본의 동일성만 뜻하며 생성 원안의 두께 보존이나 시각 품질을 대신하지 않는다.
 
 테스트 파일의 합성 PASS 기록은 실제 이미지 검수에 복사하지 않는다. 기술 검사 결과와 원본 의미·형태에 대한 직접 관찰을 분리한다.
 # 연결된 면과 범위가 고정된 수정
 
-`materialPlan.surfaces`는 원본에서 같은 연결 면임을 확인한 관찰 조각만 묶는다. 각 항목은 `id`, `regionIds`, `contourColor`, `observation`을 가진다. 같은 색이라는 이유로 별개의 물체를 합치지 않는다. 피부 면, 그 면의 1도트 경계, 인접 선의 접합부를 함께 배치하며 둘이 한 칸을 요구하면 임의 우선순위로 덮지 않는다. 원본 관찰 구분 이미지의 직접 검수가 필요하다.
+`materialPlan.surfaces`는 원본에서 같은 연결 면임을 확인한 관찰 조각만 묶는다. 각 항목은 `id`, `regionIds`, `contourColor`, `observation`을 가진다. 같은 색이라는 이유로 별개의 물체를 합치지 않는다. `materialGroups/colorInterior`는 동일 재질 계약의 색 제약이고, `regionGroups/interior/surfaces`는 기하 소유권이다. 재질 조각 수 때문에 색 검사가 빠지지 않으며 색 제약만으로 윤곽을 강제 연결하지 않는다. 실제 source map과 원안을 대조한다.
+
+변환과 저장 검증은 동일한 `resolveSourcePlanes`를 사용한다. 재질 제약 → 연결 색 면 분할 → 실제 눈 표본 보존으로 만든 `sourceLabels`가 면·눈/입 주변·경계 채움에 전달된다. 후속 단계에서 독립적인 재질 RGB 재배정 경로를 만들지 않는다. 원본 관찰이 없는 부분과 실제 눈 내부 역할은 별도 관찰 규칙을 유지한다.
 
 같은 원안의 부분 수정은 `materialPlan.preserveOutside`로 변경 범위를 고정할 수 있다. 필드는 `baseline`과 `baselineRun`(각각 절대 경로·SHA256), `sourcePixelsSha256`, 원본 좌표의 `sourceRegions`, `observation`이다. 기준 PNG와 실행 기록이 같은 원안·격자·팔레트에 속하는지 검증한다. 범위 밖은 쓰기 불변 조건이며 **기하 배치의 장애물이나 선 두께 검사의 예외가 아니다**. 기존 실행의 선·채움 근거를 합쳐 최종 PNG 전체를 검사한다. 새 원안에 이전 보존 계약을 재사용할 수 없다.
 

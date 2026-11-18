@@ -307,8 +307,16 @@ function allocateRequiredForms(PNG,source,baseline,grid,palette,policy,material=
   if(parts[1]?.length>=main.length/2){if(f.priority==='required')unresolved.push(f.name);reports.push({name:f.name,action:'multiple-comparable-components-require-separate-observations'});continue;}
   const xs=main.map(p=>p%source.width),ys=main.map(p=>Math.floor(p/source.width));
   const bounds=[Math.min(...xs),Math.min(...ys),Math.max(...xs)+1,Math.max(...ys)+1];
-  if(main.some(p=>p%source.width===rx||p%source.width===rx+rw-1||Math.floor(p/source.width)===ry||Math.floor(p/source.width)===ry+rh-1)){
-   unresolved.push(f.name);reports.push({name:f.name,action:'search-region-clips-source'});continue;
+  // Name the touching edges: either the window lacks a 1px margin there, or a
+  // neighbouring non-stroke colour (e.g. a lip tone) missing from
+  // contextSamples was classified as ink and runs out of the window.
+  const touches={left:bounds[0]===rx,top:bounds[1]===ry,right:bounds[2]===rx+rw,bottom:bounds[3]===ry+rh};
+  const edges=Object.keys(touches).filter(k=>touches[k]);
+  if(edges.length){
+   unresolved.push(f.name);
+   reports.push({name:f.name,action:'search-region-clips-source',edges,componentBounds:[bounds[0],bounds[1],bounds[2]-bounds[0],bounds[3]-bounds[1]],sourceRegion:[rx,ry,rw,rh],
+    remedy:'Keep at least one source pixel of non-stroke margin on each named edge; if the stroke itself ends inside, add the adjacent non-stroke colours there to contextSamples.'});
+   continue;
   }
   const cellX=grid.x[0][1]-grid.x[0][0],cellY=grid.y[0][1]-grid.y[0][0];
   const span=[(bounds[2]-bounds[0])/cellX,(bounds[3]-bounds[1])/cellY];
@@ -331,7 +339,14 @@ function allocateRequiredForms(PNG,source,baseline,grid,palette,policy,material=
     const planner=require('./raster-source-ink-paths.cjs'),plan=f.curve?planner.planObservedCurve(new Set(main),source.width,source.height,grid,baseline.width,baseline.height,f.curve):planner.planSourceStroke(new Set(main),source.width,source.height,grid,baseline.width,baseline.height);
     if([...plan.cells].some(p=>reserved.has(p)&&reserved.get(p).color!==color))fail('required stroke owners compete for one cell');
     const fills=new Map(),component=new Set(main),nonInk=contextPool,contextPalette=[...new Map(context.map(lab=>{const color=nonInk.reduce((a,b)=>dist(toLab(a.rgb),lab)<=dist(toLab(b.rgb),lab)?a:b);return [color.hex,color];})).values()];
-    const contextAt=q=>{const lab=toLab([...source.data.subarray(q*4,q*4+3)]);return contextPalette.reduce((a,b)=>dist(toLab(a.rgb),lab)<=dist(toLab(b.rgb),lab)?a:b);};
+    const contextAt=q=>{
+     if(material?.sourceLabels&&!material.sourceExceptions[q]&&material.owners[q]>=0){
+      const hex='#'+material.sourceLabels.data.subarray(q*4,q*4+3).toString('hex').toUpperCase();
+      if(hex===f.color)fail('stroke context conflicts with assigned material');
+      return palette.find(c=>c.hex===hex);
+     }
+     const lab=toLab([...source.data.subarray(q*4,q*4+3)]);return contextPalette.reduce((a,b)=>dist(toLab(a.rgb),lab)<=dist(toLab(b.rgb),lab)?a:b);
+    };
     // Resolve each vacated cell from its own source side. A constant global
     // context color would erase a real skin/shadow boundary underneath a line.
     for(const p of footprint)if(!plan.cells.has(p)&&!reserved.has(p)){
@@ -363,6 +378,6 @@ function allocateRequiredForms(PNG,source,baseline,grid,palette,policy,material=
   const cleared=clearVacated(new Set(path));for(const p of path)assign(p,color,f.name);
   reports.push({name:f.name,priority:f.priority,action:'source-connected-profile',span,cells:path.length,cleared,omittedSatelliteComponents:parts.length-1,decisions:result.report.features[0].decisions});
  }
- return {image,report:{method:'explicit-feature-capacity',features:reports,unresolved,reservedCells:reserved.size,status:unresolved.length?'UNRESOLVED_REQUIRED_FORMS':'AWAITING_SAVED_VISUAL_REVIEW',limitation:'Observed source roles and outline decision are required. A fitted path is not a visual or expression pass.'}};
+ return {image,report:{method:'explicit-feature-capacity',features:reports,unresolved,reservedCells:reserved.size,expectedColors:[...reserved].map(([p,r])=>[p,r.color]),status:unresolved.length?'UNRESOLVED_REQUIRED_FORMS':'AWAITING_SAVED_VISUAL_REVIEW',limitation:'Observed source roles and outline decision are required. A fitted path is not a visual or expression pass.'}};
 }
 module.exports={rasterObservedDetails,rasterFlatColorRegions,allocateRequiredForms,sourceStrokeClassifier};
