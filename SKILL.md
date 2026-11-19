@@ -2,7 +2,7 @@
 name: joespixel
 description: "Generate, edit and verify pixel artwork from the user's concept and references. Use for pixel characters, portraits, props, icons, environments and sprites requiring a fixed grid, palette, one-dot contours and direct saved-image review; not ordinary UI layout or general illustration."
 metadata:
-  version: "2.24.0"
+  version: "2.24.4"
 ---
 
 # JOESPIXEL

@@ -5,6 +5,17 @@
 const EYE_PROMPT='Visible eyes must retain the observed lid, iris, pupil and sclera spatial relationships. Separate source ownership before assigning colors: dark iris pigment is not automatically eyelid ink. One fixed color per observed role; distinct iris shading may have its own role in the same iris family. No gradients, dithering or blended edges. Preserve gaze, tilt and eye contour. Preserve source highlights only where they fit without erasing pupil/iris or breaking the lid; a source highlight connected to sclera may remain connected. Otherwise record the limitation. Do not invent human sclera for dot eyes or mechanical lenses.';
 const hex=c=>'#'+c.toString(16).padStart(8,'0').slice(0,6).toUpperCase();
 const rgba=c=>parseInt(c.slice(1)+'ff',16);
+// Source and native rings each own an interior. Ink removed by one-dot
+// allocation must be filled from that side, not from exterior face samples
+// that happen to share the same output cell.
+function enclosedStrokeCells(mask,width){
+ const points=[...mask],xs=points.map(p=>p%width),ys=points.map(p=>Math.floor(p/width));
+ const x0=Math.min(...xs)-1,x1=Math.max(...xs)+1,y0=Math.min(...ys)-1,y1=Math.max(...ys)+1,outside=new Set(),queue=[];
+ const offer=(x,y)=>{const p=y*width+x;if(x<x0||x>x1||y<y0||y>y1||mask.has(p)||outside.has(p))return;outside.add(p);queue.push(p);};
+ for(let x=x0;x<=x1;x++){offer(x,y0);offer(x,y1);}for(let y=y0;y<=y1;y++){offer(x0,y);offer(x1,y);}
+ for(let i=0;i<queue.length;i++){const x=queue[i]%width,y=Math.floor(queue[i]/width);offer(x-1,y);offer(x+1,y);offer(x,y-1);offer(x,y+1);}
+ const inside=new Set();for(let y=y0+1;y<y1;y++)for(let x=x0+1;x<x1;x++){const p=y*width+x;if(!mask.has(p)&&!outside.has(p))inside.add(p);}return inside;
+}
 // The rectangle is a search window, not anatomical ownership. A reviewed
 // source polygon excludes neighbouring hair/skin even inside that window.
 function inSourcePolygon(x,y,polygon){
@@ -45,6 +56,8 @@ function assertEyePolicy(policy,palette){
   }
   if(policy.placement==='source-partitions'){
    const names=new Set(e.roles.map(r=>r.name)),validPolygon=p=>Array.isArray(p)&&p.length>=3&&p.every(v=>Array.isArray(v)&&v.length===2&&v.every(Number.isFinite)&&v[0]>=e.rect[0]&&v[0]<=e.rect[0]+e.rect[2]&&v[1]>=e.rect[1]&&v[1]<=e.rect[1]+e.rect[3]);
+   for(const r of e.roles)if(r.interiorRoles!==undefined&&(!r.closed||!Array.isArray(r.interiorRoles)||!r.interiorRoles.length||r.interiorRoles.some(name=>!e.roles.some(v=>v.name===name&&v.geometry!=='stroke'))))throw Error('Closed eye interior must name observed non-stroke roles');
+   if(e.contextRoles!==undefined&&(!Array.isArray(e.contextRoles)||!e.contextRoles.length||e.contextRoles.some(name=>!e.baseRoles?.includes(name)||!e.roles.some(r=>r.name===name&&r.geometry==='fill'&&!r.protect))))throw Error('Eye context roles must be observed unprotected base fills');
    if(!e.sourcePolygon||names.size!==e.roles.length||e.roles.some(r=>!r.family||r.family==='source-context'))throw Error('Source eye placement requires ownership, unique roles and role families');
    if(!Array.isArray(e.baseRoles)||!e.baseRoles.length||e.baseRoles.some(r=>!names.has(r))||!e.partitions?.length)throw Error('Observed base roles and source partitions required');
    for(const p of e.partitions)if(!p.name||!p.observation?.trim()||!validPolygon(p.sourcePolygon)||!p.roles?.length||p.roles.some(r=>!names.has(r)))throw Error('Invalid observed eye partition');
@@ -167,22 +180,42 @@ function placeSourceEyePartitions(PNG,source,baseline,palette,policy,grid,materi
  const reports=[],claimed=new Set(),contextCache=new Map();
  const contextAt=(q,roles)=>{const owner=material&&!material.sourceExceptions[q]?material.owners[q]:-1;
   const key=material?.sourceLabels?q:owner+':'+source.data.readUInt32BE(q*4);if(contextCache.has(key))return contextCache.get(key);const lab=toLab([...source.data.subarray(q*4,q*4+3)]);
-  // A broad material polygon is not permission to erase observed lash/white
-  // samples outside the eye shape. Both source-role and material must agree.
-  const closest=roles.reduce((a,b)=>Math.min(...a.labs.map(s=>distance(s,lab)))<=Math.min(...b.labs.map(s=>distance(s,lab)))?a:b);
-  const region=owner>=0?material.plan.regions[owner]:null,allowed=region&&closest.family===region.material?new Set(region.colors):null;let k=-1;
-  if(allowed&&material.sourceLabels){const assigned='#'+material.sourceLabels.data.subarray(q*4,q*4+3).toString('hex').toUpperCase();if(!allowed.has(assigned))throw Error('Eye context conflicts with assigned material');contextCache.set(key,assigned);return assigned;}
+  // Outside actual feature ownership, consume the already reviewed material.
+  // Reclassifying its raw antialias RGB against eye samples used to turn skin
+  // into a hair highlight. An incomplete eye polygon must be corrected at
+  // observation time, not silently override a different material here.
+  let region=owner>=0?material.plan.regions[owner]:null;
+  // Legacy callers may supply broad observation envelopes without compiled
+  // source labels. Such an envelope is not a resolved material assignment:
+  // retain the observed eye pigment if its sample belongs to another role.
+  if(region&&!material.sourceLabels){const observed=roles.reduce((a,b)=>Math.min(...a.labs.map(v=>distance(lab,v)))<=Math.min(...b.labs.map(v=>distance(lab,v)))?a:b);if(observed.family!==region.material)region=null;}
+  const allowed=region?new Set(region.colors):null;let k=-1;
+  if(allowed&&material.sourceLabels){const assigned='#'+material.sourceLabels.data.subarray(q*4,q*4+3).toString('hex').toUpperCase();if(!allowed.has(assigned))throw Error('Eye context conflicts with assigned material');const result={color:assigned,family:region.material};contextCache.set(key,result);return result;}
   for(let i=0;i<palette.length;i++)if((!allowed||allowed.has(palette[i].hex))&&(k<0||distance(lab,paletteLabs[i])<distance(lab,paletteLabs[k])))k=i;
-  if(k<0)throw Error('Eye context has no assigned material color');contextCache.set(key,palette[k].hex);return palette[k].hex;};
+  if(k<0)throw Error('Eye context has no assigned material color');const result={color:palette[k].hex,family:region?.material??'source-context'};contextCache.set(key,result);return result;};
  for(const eye of policy.eyes){
   contextCache.clear();
   const [rx,ry,rw,rh]=eye.rect;if(rx+rw>source.width||ry+rh>source.height)throw Error('Eye region outside source');
   const roles=eye.roles.map(r=>({...r,labs:r.samples.map(toLab)})),labels=new Map(),sourceCounts=roles.map(()=>0),cache=new Map();
+  // Optional coordinates bind observed context samples to this source and
+  // its reviewed material. Stale hair/edge RGB cannot impersonate skin.
+  for(const role of roles)if(role.samplePoints){
+   if(role.samplePoints.length!==role.samples.length)throw Error('Eye source sample coordinates/count mismatch');
+   for(let i=0;i<role.samplePoints.length;i++){
+    const pt=role.samplePoints[i];if(!Array.isArray(pt)||pt.length!==2||!pt.every(Number.isInteger)||pt[0]<0||pt[1]<0||pt[0]>=source.width||pt[1]>=source.height)throw Error('Invalid eye sample coordinate');
+    const q=pt[1]*source.width+pt[0];if(role.samples[i].some((v,k)=>v!==source.data[q*4+k]))throw Error('Eye source sample changed');
+    if(eye.contextRoles?.includes(role.name)&&material?.plan.regions.some(r=>r.material===role.family)){const owner=material.owners[q];if(owner<0||material.plan.regions[owner].material!==role.family)throw Error('Eye context sample has a different material owner');}
+   }
+  }
   for(let y=Math.floor(ry);y<Math.ceil(ry+rh);y++)for(let x=Math.floor(rx);x<Math.ceil(rx+rw);x++){
    if(!eyeOwnsSource(eye,x+.5,y+.5))continue;
    const parts=eye.partitions.filter(p=>inSourcePolygon(x+.5,y+.5,p.sourcePolygon));if(parts.length>1)throw Error('Overlapping source eye partitions');
-   const allowed=parts[0]?.roles??eye.baseRoles,q=y*source.width+x,key=allowed.join('/')+':'+source.data.readUInt32BE(q*4);let role=cache.get(key);
-   if(role===undefined){const lab=toLab([...source.data.subarray(q*4,q*4+3)]);let best=Infinity;for(let r=0;r<roles.length;r++)if(allowed.includes(roles[r].name)){const d=Math.min(...roles[r].labs.map(s=>distance(s,lab)));if(d<best){best=d;role=r;}}cache.set(key,role);}
+   // A source partition distinguishes coincident pigments (pupil/lash), but
+   // is not evidence that every antialiased edge sample belongs to its fill.
+   // Observed surrounding fills may compete; equal RGB stays with the
+   // partition, so white glints and dark pupils keep their intended role.
+   const primary=parts[0]?.roles??eye.baseRoles,allowed=[...new Set([...primary,...(eye.contextRoles??[])])],q=y*source.width+x,key=primary.join('/')+':'+source.data.readUInt32BE(q*4);let role=cache.get(key);
+   if(role===undefined){const lab=toLab([...source.data.subarray(q*4,q*4+3)]);let best=Infinity;for(const name of allowed){const r=roles.findIndex(v=>v.name===name),d=Math.min(...roles[r].labs.map(s=>distance(s,lab)));if(d<best){best=d;role=r;}}cache.set(key,role);}
    labels.set(q,role);sourceCounts[role]++;sourceRoleMap.data.writeUInt32BE(rgba(roles[role].color),q*4);
   }
   const cells=[],nativeRoles=new Map(),nativeFamilies=new Map(),overlaps=new Map(),strokeClaims=new Map(),strokePlans=[];
@@ -191,16 +224,17 @@ function placeSourceEyePartitions(PNG,source,baseline,palette,policy,grid,materi
    if(!mask.size){if(roles[r].required!==false)throw Error('Required eye stroke absent: '+roles[r].name);continue;}
    let plan;try{plan=require('./raster-source-ink-paths.cjs').planSourceStroke(mask,source.width,source.height,grid,image.width,image.height,{closed:roles[r].closed===true});}catch(error){error.message=eye.name+'/'+roles[r].name+': '+error.message;throw error;}
    for(const p of plan.cells){if(strokeClaims.has(p))throw Error('Eye stroke roles compete for one cell');strokeClaims.set(p,r);}
-   strokePlans.push({role:r,...plan});
+   strokePlans.push({role:r,...plan,...(roles[r].closed?{sourceInterior:enclosedStrokeCells(mask,source.width),nativeInterior:enclosedStrokeCells(plan.cells,image.width),interiorRoles:roles[r].interiorRoles?new Set(roles[r].interiorRoles.map(name=>roles.findIndex(v=>v.name===name))):null}:{})});
   }
   for(let y=0;y<image.height;y++)for(let x=0;x<image.width;x++){
    const [a,b]=grid.x[x],[c,d]=grid.y[y];if(a>=rx+rw||b<=rx||c>=ry+rh||d<=ry)continue;
-   const groups=new Map(),p=y*image.width+x;let owned=0;
+   const groups=new Map(),p=y*image.width+x,interiorPlan=strokePlans.find(plan=>plan.nativeInterior?.has(p));let owned=0;
    for(let sy=Math.max(0,Math.floor(c));sy<Math.min(source.height,Math.ceil(d));sy++)for(let sx=Math.max(0,Math.floor(a));sx<Math.min(source.width,Math.ceil(b));sx++){
     const q=sy*source.width+sx,role=labels.get(q),weight=(Math.min(b,sx+1)-Math.max(a,sx))*(Math.min(d,sy+1)-Math.max(c,sy));
-    const family=role===undefined?'source-context':roles[role].family,color=role===undefined?contextAt(q,roles):roles[role].color;
+    const context=role===undefined?contextAt(q,roles):null,family=context?.family??roles[role].family,color=context?.color??roles[role].color;
     if(role!==undefined){owned+=weight;if(!overlaps.has(q))overlaps.set(q,[]);overlaps.get(q).push([p,weight]);}
     if(policy.geometryPolicy&&roles[role]?.geometry==='stroke')continue;
+    if(interiorPlan&&(!interiorPlan.sourceInterior.has(q)||interiorPlan.interiorRoles&&!interiorPlan.interiorRoles.has(role)))continue;
     if(!groups.has(family))groups.set(family,{family,weight:0,tones:new Map()});const group=groups.get(family),key=color;group.weight+=weight;
     if(!group.tones.has(key))group.tones.set(key,{role,color,weight:0,roleWeights:new Map()});
     const tone=group.tones.get(key);tone.weight+=weight;tone.roleWeights.set(role,(tone.roleWeights.get(role)||0)+weight);
@@ -208,6 +242,12 @@ function placeSourceEyePartitions(PNG,source,baseline,palette,policy,grid,materi
    }
    if(!owned)continue;if(claimed.has(p))throw Error('Overlapping eye cell ownership');claimed.add(p);cells.push(p);
    if(strokeClaims.has(p)){const r=strokeClaims.get(p);image.data.writeUInt32BE(rgba(roles[r].color),p*4);nativeRoles.set(p,r);nativeFamilies.set(p,roles[r].family);continue;}
+   if(!groups.size&&interiorPlan){
+    const cx=(a+b)/2,cy=(c+d)/2,candidates=[...interiorPlan.sourceInterior].filter(q=>labels.has(q)&&roles[labels.get(q)].geometry!=='stroke'&&(!interiorPlan.interiorRoles||interiorPlan.interiorRoles.has(labels.get(q))));
+    candidates.sort((u,v)=>(u%source.width+.5-cx)**2+(Math.floor(u/source.width)+.5-cy)**2-((v%source.width+.5-cx)**2+(Math.floor(v/source.width)+.5-cy)**2));
+    if(!candidates.length)throw Error('Closed eye stroke has no observed interior fill');
+    const r=labels.get(candidates[0]),{family,color}=roles[r];groups.set(family,{family,weight:1,tones:new Map([[r,{role:r,color,weight:1}]])});
+   }
    // A cell wholly covered by thick source ink can be vacated by its planned
    // one-dot path. Sample away from that path on the SAME source side. Never
    // borrow an iris color across a boundary or leave the old thick ink under it.
@@ -216,7 +256,7 @@ function placeSourceEyePartitions(PNG,source,baseline,palette,policy,grid,materi
     const dx=x-anchor%image.width,dy=y-Math.floor(anchor/image.width),length=Math.hypot(dx,dy);let found=false;
     for(let t=0;t<=Math.hypot(rw,rh);t+=.5){const sx=Math.floor((a+b)/2+dx/length*t),sy=Math.floor((c+d)/2+dy/length*t);if(sx<rx||sy<ry||sx>=rx+rw||sy>=ry+rh)break;
      const q=sy*source.width+sx,r=labels.get(q);if(roles[r]?.geometry==='stroke')continue;
-     const family=r===undefined?'source-context':roles[r].family,color=r===undefined?contextAt(q,roles):roles[r].color;
+     const context=r===undefined?contextAt(q,roles):null,family=context?.family??roles[r].family,color=context?.color??roles[r].color;
      groups.set(family,{family,weight:1,tones:new Map([[r,{role:r,color,weight:1}]])});found=true;break;
     }
     if(!found)throw Error('Eye stroke has no source-supported adjacent fill');
@@ -246,7 +286,10 @@ function placeSourceEyePartitions(PNG,source,baseline,palette,policy,grid,materi
    }
    reflection.push({status:chosen===null?'omitted-no-room':'source-highlight-preserved',sourcePixels:part.length,cell:chosen,sourceJoinedToWhite:sourceJoined});
   }
-  const geometry=policy.geometryPolicy?{executed:true,strokes:strokePlans.map(p=>({role:roles[p.role].name,color:roles[p.role].color,cells:[...p.cells],footprint:[...p.footprint],sameColorFill:[...nativeRoles].filter(([q,r])=>r!==p.role&&image.data.readUInt32BE(q*4)===rgba(roles[p.role].color)).map(([q])=>q),sourceTopology:p.sourceTopology,nativeTopology:p.nativeTopology})),width:1}:null;
+  // Unknown context is not proof of a filled shape. Previously every dark
+  // sample outside a clipped eye polygon silently exempted a duplicate rim.
+  const explicitContextFills=new Set((material?.plan.regions??[]).filter(r=>r.geometry==='fill').map(r=>r.material));
+  const geometry=policy.geometryPolicy?{executed:true,strokes:strokePlans.map(p=>({role:roles[p.role].name,color:roles[p.role].color,cells:[...p.cells],footprint:[...p.footprint],sameColorFill:[...nativeRoles].filter(([q,r])=>r!==p.role&&(roles[r]?.geometry==='fill'||roles[r]?.geometry==='feature'||explicitContextFills.has(nativeFamilies.get(q)))&&image.data.readUInt32BE(q*4)===rgba(roles[p.role].color)).map(([q])=>q),sourceTopology:p.sourceTopology,nativeTopology:p.nativeTopology})),width:1}:null;
   if(policy.geometryPolicy)for(let r=0;r<roles.length;r++)if(roles[r].required!==false&&sourceCounts[r]&&![...nativeRoles.values()].includes(r))throw Error('Eye joint placement erased required role: '+roles[r].name);
   reports.push({name:eye.name,cells,roles:roles.map((r,i)=>({name:r.name,color:r.color,family:r.family,sourcePixels:sourceCounts[i],nativeCells:[...nativeRoles.values()].filter(v=>v===i).length})),reflection,geometry,fillShapes});
  }

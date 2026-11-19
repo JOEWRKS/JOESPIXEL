@@ -186,4 +186,12 @@ test('a cap farther from its skeleton remains a supported candidate rather than 
  const g={x:Array.from({length:16},(_,i)=>[i*4,i*4+4]),y:Array.from({length:16},(_,i)=>[i*4,i*4+4])},curve={version:1,axis:'y',flow:'smooth',observation:'Gentle seam rises to a short thicker cap.',landmarks:[{name:'left',kind:'endpoint',sourceRegion:[8,18,6,6]},{name:'right',kind:'endpoint',sourceRegion:[20,10,6,7]}]};
  const r=planObservedCurve(mask,64,64,g,16,16,curve);assert.equal(r.curve.orderedCells[0],5*16+2);assert.equal(r.curve.orderedCells.at(-1),3*16+6);assert.equal(r.cells.size,5);assert.deepEqual(r.nativeTopology,{components:1,holes:0});
 });
+test('level seam with alternative cap rows cannot acquire an unobserved central peak',()=>{
+ const {planObservedCurve}=require('./raster-source-ink-paths.cjs'),mask=new Set();
+ // A nearly level source ribbon, with a thicker left cap across a grid row.
+ for(let y=22;y<30;y++)for(let x=y===22?20:19;x<(y<27?49:y===27?43:32);x++)mask.add(y*64+x);
+ const g={x:Array.from({length:8},(_,i)=>[i*8,i*8+8]),y:Array.from({length:8},(_,i)=>[i*8,i*8+8])},curve={version:1,axis:'y',flow:'smooth',observation:'A closed seam has two level end observations and no central extremum.',landmarks:[{name:'left',kind:'endpoint',sourceRegion:[14,18,13,18]},{name:'right',kind:'endpoint',sourceRegion:[42,18,14,16]}]};
+ const r=planObservedCurve(mask,64,64,g,8,8,curve),rows=r.curve.orderedCells.map(p=>Math.floor(p/8));
+ assert.equal(new Set(rows).size,1,'A cap option must not produce a center rise and return');assert.equal(r.cells.size,5);assert.deepEqual(r.nativeTopology,{components:1,holes:0});
+});
 console.log(count+' required-form tests passed');

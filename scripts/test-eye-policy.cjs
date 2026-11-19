@@ -140,4 +140,44 @@ test('observed oval keeps width and height across subcell phases without changin
   const bad=structuredClone(p);bad.eyes[0].roles[0].geometry='stroke';bad.eyes[0].roles[0].width=1;assert.throws(()=>assertEyePolicy(bad,palette),/protected source fill/);
  }
 });
+test('eye fringe consumes assigned skin instead of reclassifying it as a hair highlight',()=>{
+ const pal=parsePalette({colors:['#FFFFFF','#101010','#3080A0','#FFCC99','#FFF0CC']}),s=new PNG({width:8,height:8}),assigned=new PNG({width:8,height:8}),b=new PNG({width:1,height:1});b.data.fill(255);
+ for(let y=0;y<8;y++)for(let x=0;x<8;x++){s.data.set([...(x<3?[48,128,160]:[255,240,204]),255],(y*8+x)*4);assigned.data.writeUInt32BE(0xffcc99ff,(y*8+x)*4);}
+ const owners=new Int16Array(64).fill(0),material={owners,sourceExceptions:new Uint8Array(64),sourceLabels:assigned,plan:{regions:[{material:'skin',colors:['#FFCC99']}]}};
+ const p={version:1,visibility:'visible',placement:'source-partitions',geometryPolicy:'source-stroke-fill',observation:'An eye occupies three source columns; the remaining five are reviewed skin despite their hair-like raw RGB.',eyes:[{name:'fixture',rect:[0,0,8,8],sourcePolygon:[[0,0],[3,0],[3,8],[0,8]],baseRoles:['iris'],reflection:'off',partitions:[{name:'inner',sourcePolygon:[[0,0],[3,0],[3,8],[0,8]],roles:['iris'],observation:'Actual blue columns only.'}],roles:[{name:'iris',family:'iris',geometry:'fill',color:'#3080A0',colors:['#3080A0'],samples:[[48,128,160]],required:false}]}]};
+ const result=applyEyePolicy(PNG,s,b,pal,p,{x:[[0,8]],y:[[0,8]]},material);
+ assert.equal(result.image.data.readUInt32BE(0),0xffcc99ff);
+});
+
+test('partition fringe can remain skin; sample coordinates reject stale RGB and wrong material ownership',()=>{
+ const pal=parsePalette({colors:['#FFFFFF','#101010','#3080A0','#FFCC99']}),s=new PNG({width:8,height:8}),b=new PNG({width:1,height:1});b.data.fill(255);
+ for(let y=0;y<8;y++)for(let x=0;x<8;x++)s.data.set([...(x<3?[48,128,160]:[255,204,153]),255],(y*8+x)*4);
+ const shape=[[0,0],[8,0],[8,8],[0,8]],p={version:1,visibility:'visible',placement:'source-partitions',geometryPolicy:'source-stroke-fill',observation:'Broad iris partition includes a skin-colored antialias fringe.',eyes:[{name:'fixture',rect:[0,0,8,8],sourcePolygon:shape,baseRoles:['skin'],contextRoles:['skin'],reflection:'off',partitions:[{name:'iris',sourcePolygon:shape,roles:['iris'],observation:'Iris envelope includes its real surrounding skin.'}],roles:[
+ {name:'iris',family:'iris',geometry:'fill',color:'#3080A0',colors:['#3080A0'],samples:[[48,128,160]],required:false},
+ {name:'skin',family:'skin',geometry:'fill',color:'#FFCC99',colors:['#FFCC99'],samples:[[255,204,153]],samplePoints:[[5,4]],required:false}]}]};
+ const material={owners:new Int16Array(64).fill(0),sourceExceptions:new Uint8Array(64),sourceLabels:s,plan:{regions:[{material:'skin',colors:['#FFCC99']},{material:'hair',colors:['#FFCC99']}]}},g={x:[[0,8]],y:[[0,8]]};
+ const result=applyEyePolicy(PNG,s,b,pal,p,g,material);assert.equal(result.image.data.readUInt32BE(0),0xffcc99ff);
+ const legacy=structuredClone(p);delete legacy.eyes[0].contextRoles;assert.equal(applyEyePolicy(PNG,s,b,pal,legacy,g,material).image.data.readUInt32BE(0),0x3080a0ff);
+ material.owners[4*8+5]=1;assert.throws(()=>applyEyePolicy(PNG,s,b,pal,p,g,material),/different material owner/);material.owners[4*8+5]=0;
+ const stale=structuredClone(p);stale.eyes[0].roles[1].samples[0][0]=254;assert.throws(()=>applyEyePolicy(PNG,s,b,pal,stale,g,material),/sample changed/);
+ const bad=structuredClone(p);bad.eyes[0].contextRoles=['iris'];assert.throws(()=>assertEyePolicy(bad,pal),/context/);
+});
+test('clipped closed-eye ownership cannot exempt a parallel old rim as unknown context',()=>{
+ const s=new PNG({width:64,height:64});s.data.fill(255);
+ for(let y=0;y<64;y++)for(let x=0;x<64;x++){const r=Math.hypot(x+.5-32,y+.5-32);s.data.writeUInt32BE(r<16?0x3080a0ff:r<24?0x101010ff:0xffffffff,(y*64+x)*4);}
+ const make=radius=>{const poly=Array.from({length:64},(_,i)=>[32+radius*Math.cos(i*Math.PI/32),32+radius*Math.sin(i*Math.PI/32)]);return{version:1,visibility:'visible',placement:'source-partitions',geometryPolicy:'source-stroke-fill',observation:'Full source ring versus an observation that clips its outer cross-section.',eyes:[{name:'round lens',rect:[32-radius,32-radius,radius*2,radius*2],sourcePolygon:poly,reflection:'off',baseRoles:['rim','lens','white'],partitions:[{name:'observed lens',sourcePolygon:poly,roles:['rim','lens','white'],observation:'Source colors only.'}],roles:[
+  {name:'rim',family:'rim',geometry:'stroke',width:1,closed:true,color:'#101010',colors:['#101010'],samples:[[16,16,16]]},
+  {name:'lens',family:'lens',geometry:'fill',color:'#3080A0',colors:['#3080A0'],samples:[[48,128,160]]},
+  {name:'white',family:'white',geometry:'fill',color:'#FFFFFF',colors:['#FFFFFF'],samples:[[255,255,255]],required:false}
+ ]}]};};
+ const b=buildNative(PNG,s,palette,16,16,'#FFFFFF','area-vote').image,g=affineEyeGrid(s,b,{fitWidth:16,fitHeight:16,offsetX:0,offsetY:0});
+ const clipped=make(19),bad=applyEyePolicy(PNG,s,b,palette,clipped,g),badAudit=auditEyePolicy(PNG,s,bad.image,palette,clipped,g);
+ assert.equal(badAudit.status,'FAIL');assert(badAudit.strokes[0].excessInk.length>0,'Unowned dark context must not masquerade as a declared fill');
+ const full=make(26),good=applyEyePolicy(PNG,s,b,palette,full,g);assert.equal(auditEyePolicy(PNG,s,good.image,palette,full,g).status,'PASS');
+ for(let y=5;y<11;y++)for(let x=5;x<11;x++)assert.equal(good.image.data.readUInt32BE((y*16+x)*4),0x3080a0ff,'Interior reallocation must not borrow exterior white');
+ assert.equal(good.image.data.readUInt32BE(0),0xffffffff);
+ const typed=structuredClone(full);typed.eyes[0].roles[0].interiorRoles=['lens'];
+ const typedResult=applyEyePolicy(PNG,s,b,palette,typed,g);assert.equal(auditEyePolicy(PNG,s,typedResult.image,palette,typed,g).status,'PASS');
+ typed.eyes[0].roles[0].interiorRoles=['rim'];assert.throws(()=>assertEyePolicy(typed,palette),/observed non-stroke/);
+});
 console.log(n+' eye policy checks passed');

@@ -407,6 +407,11 @@ function planObservedCurve(mask,sw,sh,grid,w,h,curve){
   const from=landmarks[s.stage-1].ordinate,to=landmarks[s.stage].ordinate,direction=Math.sign(to-from),targetOrd=landmarks[s.stage].cells.map(coord),bound=direction>0?Math.max(...targetOrd):Math.min(...targetOrd);
   for(const next of adj[last]){if((s.blocked&bits[next])||s.path.includes(next))continue;const p=nodes[next],ord=coord(p),old=coord(nodes[last]),which=owner.get(p);if(which!==undefined&&which!==s.stage&&which!==s.stage-1)continue;
    if(direction===0?ord<Math.min(...targetOrd,from)||ord>Math.max(...targetOrd,from):direction*(ord-old)<0||direction*(bound-ord)<0)continue;
+   // Alternative cap rows are choices for the whole interval, not permission
+   // to visit one row and return to another. That invented an undeclared
+   // one-cell peak in otherwise level seams when a cap straddled the grid.
+   const actualDirection=Math.sign(old-coord(nodes[s.anchor]));
+   if(direction===0&&actualDirection&&(ord-old)*actualDirection<0)continue;
    const placementCost=curve.flow==='smooth'?1+segmentError(nodes[last],p):2-Math.min(1,coverage.get(p)/(step*step));
    const atTurn=targets[s.stage].has(next);if(s.run&&!atTurn)continue;
    // Moving caps transversely must not erase or invert the source-observed
