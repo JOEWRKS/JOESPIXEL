@@ -52,6 +52,9 @@ if(require.main===module){
  test('missing capacity cannot be skipped',()=>{const l=make();l.stages.splice(1,1);assert.throws(()=>historical(l,2),/Stage 2/);});
  const reject=(name,mutate,pattern)=>test(name,()=>{const l=make();mutate(l);assert.throws(()=>historical(l,5),pattern);});
  reject('one grid is not a comparison',l=>l.stages[1].selection.candidates.pop(),/at least two/);
+ test('explicit fixed size tests capacity without manufacturing an alternative',()=>{const l=make();l.stages[0].execution.fixedGridUserRequest='User explicitly requires 3px';l.stages[1].selection.mode='user-fixed';l.stages[1].selection.candidates.pop();assert.equal(historical(l,2).status,'PASS');});
+ reject('fixed size without user evidence is blocked',l=>{l.stages[1].selection.mode='user-fixed';l.stages[1].selection.candidates.pop();},/explicit user grid/);
+ reject('fixed size cannot hide failed boundary capacity',l=>{l.stages[0].execution.fixedGridUserRequest='User requires 3px';l.stages[1].selection.mode='user-fixed';l.stages[1].selection.candidates.pop();l.stages[1].selection.candidates[0].boundaries[0].continuity.status='FAIL';},/unresolved boundary/);
  reject('a failed selected candidate blocks work',l=>l.stages[1].selection.candidates[0].status='FAIL',/selected grid/);
  reject('coverage failure cannot hide in PASS',l=>l.stages[1].selection.candidates[0].boundaries[0].coverage.status='FAIL',/unresolved boundary/);
  reject('lost feature capacity cannot hide in PASS',l=>l.stages[1].selection.candidates[0].checks.requiredForms.status='FAIL',/unresolved capacity/);

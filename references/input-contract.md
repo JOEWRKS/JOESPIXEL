@@ -43,6 +43,8 @@ node scripts/run-pixel-workflow.cjs verify /absolute/path/new-run
 }
 ```
 
+신규 원안은 비픽셀 일러스트다. `pixel-designed`와 `native-grid`는 새 제작 입구에서 차단한다. 정확한 native 파일을 재래스터화하지 않는다. 사용자 고정 크기는 `selection.mode: user-fixed`와 1단계 `execution.fixedGridUserRequest`로 묶고, 해당 격자의 실제 시험 PNG 한 세트와 모든 경계·용량 검수를 요구한다. 미지정 크기는 기존 후보 비교를 사용한다.
+
 ## contract.json
 
 | 필드 | 의미 |
@@ -52,7 +54,7 @@ node scripts/run-pixel-workflow.cjs verify /absolute/path/new-run
 | `width`, `height`, `scale` | native 가로/세로, 정수 표시 배율 1–8. 원안 캔버스는 `[width×scale, height×scale]` |
 | `background`, `paletteCount`, `alpha` | 팔레트에 있는 배경색, 목록 색 수, 현재 생성 경로는 `opaque` |
 | `displayTarget` | 실제 사용 크기·위치의 설명 |
-| `sourceAssessment` | `status: READY_FOR_CONVERSION`, `representation: pixel-designed`, `sourceSha256`, 직접 관찰한 `observation` |
+| `sourceAssessment` | `status: READY_FOR_CONVERSION`, `representation: illustration`, `sourceSha256`, 직접 관찰한 `observation` |
 | `gridPlacement` | `mode: fixed-asset-grid`, `canvas`, `cell: scale`, `origin: [0,0]`, `sourceSha256` |
 | `sourceToNative` | `scaleX/scaleY: 1/scale`, `offsetX/offsetY: 0` |
 | `eyePolicy` | 눈의 실제 구성·원본 소유 영역·고정 역할색 |

@@ -36,8 +36,10 @@ function sourceGate(contract, PNG) {
   const s=contract.sourceAssessment;
   need(s?.status==='READY_FOR_CONVERSION' && s.sourceSha256===contract.source.sha256 &&
     typeof s.observation==='string' && s.observation.trim(), 'Source assessment missing, stale or not ready');
-  need(['illustration','pixel-designed','native-grid'].includes(s.representation),
-    'Source representation required: illustration, pixel-designed, or native-grid');
+  need(s.representation==='illustration',
+    'Single-grid production requires a non-pixel illustration; approximate pixel art must not be rasterized again. Preserve native-grid assets through their original export path.');
+  need(contract.stageChecks.stages[0].output.sha256===contract.source.sha256,
+    'Single-grid capacity and assignment must observe the same illustration; a regenerated source requires fresh capacity evidence');
   const fixed=require('./build-palette-native.cjs').assertFixedGridPlacement(contract,PNG.sync.read(fs.readFileSync(contract.source.path)));
   need(fixed, 'Production requires an explicit locked fixed-asset-grid mapping');
   if(contract.outlinePolicy)need(fixed&&contract.outlineDecision?.width===1&&contract.outlineDecision.mode==='continuous'&&contract.outlineDecision.colorPolicy==='darker-local-material',

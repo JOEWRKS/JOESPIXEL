@@ -167,7 +167,10 @@ function assertCapacitySelection(stage,first,asset,fail){
  need(asset(s.source,n,'capacity source')===first.output.sha256&&asset(s.reference,n,'capacity reference')===first.reference.sha256,'capacity probes must use this characterization and original');
  need(Array.isArray(s.requiredBoundaries)&&s.requiredBoundaries.length&&s.requiredBoundaries.every(b=>text(b.id)&&text(b.observation)&&['exterior','contact'].includes(b.kind)),'required boundary inventory missing');
  const ids=s.requiredBoundaries.map(b=>b.id);need(new Set(ids).size===ids.length&&s.requiredBoundaries.some(b=>b.kind==='exterior'),'complete exterior boundary inventory required');
- need(Array.isArray(s.candidates)&&s.candidates.length>=2,'compare at least two actual candidate grids');
+ const fixed=s.mode==='user-fixed';
+ need(s.mode===undefined||s.mode==='compare'||fixed,'unknown capacity selection mode');
+ if(fixed)need(text(first.execution?.fixedGridUserRequest),'fixed capacity needs explicit user grid request');
+ need(Array.isArray(s.candidates)&&(fixed?s.candidates.length===1:s.candidates.length>=2),fixed?'user-fixed capacity must test exactly the requested grid':'compare at least two actual candidate grids');
  need(new Set(s.candidates.map(c=>c.id)).size===s.candidates.length&&s.candidates.every(c=>text(c.id)),'unique candidate ids required');
  const {PNG}=require(require.resolve('pngjs',{paths:[__dirname,process.cwd()]}));
  const {parsePalette,inspect}=require('./build-palette-native.cjs');
@@ -194,7 +197,7 @@ function assertCapacitySelection(stage,first,asset,fail){
   }
   for(const k of CAPACITY_CHECKS){const v=c.checks?.[k];need(['PASS','FAIL','UNVERIFIED'].includes(v?.status)&&text(v.observation),'capacity candidate check required: '+k);if(c.status==='PASS')need(v.status==='PASS','candidate PASS hides unresolved capacity '+k);}
  }
- need(new Set(s.candidates.map(c=>c.grid.cell)).size>=2,'same grid at different zoom is not a capacity comparison');
+ if(!fixed)need(new Set(s.candidates.map(c=>c.grid.cell)).size>=2,'same grid at different zoom is not a capacity comparison');
  const chosen=s.candidates.find(c=>c.id===s.selectedId);
  need(chosen?.status==='PASS'&&JSON.stringify(stable(chosen.grid))===JSON.stringify(stable(stage.grid)),'selected grid must pass and match the locked grid');
 }

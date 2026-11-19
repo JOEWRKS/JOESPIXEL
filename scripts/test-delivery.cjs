@@ -24,7 +24,7 @@ function fixture({sourceImage=null,paletteColors=['#FFFFFF','#222222'],formPolic
   const materialPlan=save('material-plan.json',plan);
   const map=save('material-map.png',PNG.sync.write(m.compile(PNG,source,palette,...grid.native,plan,policies).map));
   const c={version:1,kind:'other',source:sourceAsset,palette:paletteAsset,width:grid.native[0],height:grid.native[1],scale:4,paletteCount:palette.length,alpha:'opaque',background:paletteColors[0],displayTarget:'Synthetic fixed-grid preview',eyePolicy,formPolicy,materialPlan,
-    sourceAssessment:{status:'READY_FOR_CONVERSION',representation:'pixel-designed',sourceSha256:sourceAsset.sha256,observation},
+    sourceAssessment:{status:'READY_FOR_CONVERSION',representation:'illustration',sourceSha256:sourceAsset.sha256,observation},
     gridPlacement:{mode:'fixed-asset-grid',canvas:grid.canvas,cell:4,origin:[0,0],sourceSha256:sourceAsset.sha256},
     sourceToNative:{scaleX:0.25,scaleY:0.25,offsetX:0,offsetY:0},features:[{id:'marker',sourceObservation:observation,criterion:'Preserve square shape.'}],...(outlinePolicy?{outlinePolicy,outlineDecision}:{})};
   const ledger=fixtureSixLedger(sourceAsset,paletteAsset,sourceAsset,grid);ledger.version=3;
@@ -128,6 +128,7 @@ test('internal stroke without explicit source path cannot enter new production',
 test('required stroke cannot start production with blanket endpoint protection',()=>{
  const f=fixture();f.c.formPolicy={version:1,placement:'source-path',features:[{kind:'stroke',priority:'required'}]};f.save('contract.json',f.c);assert.throws(()=>workflow.prepare(f.job.path,f.run,PNG),/observed curve landmarks/);assert(!fs.existsSync(f.run));
 });
+test('approximate pixels and native grids cannot be resampled by new production',()=>{for(const representation of ['pixel-designed','native-grid']){const f=fixture();f.c.sourceAssessment.representation=representation;f.save('contract.json',f.c);assert.throws(()=>workflow.prepare(f.job.path,f.run,PNG),/non-pixel illustration/);assert(!fs.existsSync(f.run));}});
 test('legacy routes fail explicitly before writing output',()=>{for(const patch of [{redesign:{}},{measuredConversion:{}},{mode:'scoped-repair'}]){const f=fixture();Object.assign(f.c,patch);f.save('contract.json',f.c);assert.throws(()=>workflow.prepare(f.job.path,f.run,PNG),/Retired/);assert(!fs.existsSync(f.run));}});
 test('grid alteration cannot reuse the locked plan',()=>{const f=fixture();f.c.gridPlacement.cell=2;f.save('contract.json',f.c);assert.throws(()=>workflow.prepare(f.job.path,f.run,PNG),/Fixed asset grid/);});
 test('sampler substitution cannot reuse the locked stages',()=>{const f=fixture();f.save('job.json',{contract:f.contract.path,background:f.c.background,sampling:'nearest'});assert.throws(()=>workflow.prepare(f.job.path,f.run,PNG),/Execution differs/);});

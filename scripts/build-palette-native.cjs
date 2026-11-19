@@ -692,7 +692,7 @@ function assertFixedGridPlacement(contract, source) {
   }
   const p=contract.gridPlacement;
   if(!p)return false;
-  const ok=p.mode==='fixed-asset-grid' && contract.sourceAssessment?.representation==='pixel-designed' && !contract.redesign &&
+  const ok=p.mode==='fixed-asset-grid' && ['illustration','pixel-designed'].includes(contract.sourceAssessment?.representation) && !contract.redesign &&
     p.sourceSha256===contract.source?.sha256 && p.cell===contract.scale &&
     JSON.stringify(p.origin)==='[0,0]' && JSON.stringify(p.canvas)===JSON.stringify([source.width,source.height]) &&
     source.width===contract.width*contract.scale && source.height===contract.height*contract.scale &&

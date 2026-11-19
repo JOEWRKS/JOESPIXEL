@@ -2,7 +2,7 @@
 name: joespixel
 description: "Generate, edit and verify pixel artwork from the user's concept and references. Use for pixel characters, portraits, props, icons, environments and sprites requiring a fixed grid, palette, one-dot contours and direct saved-image review; not ordinary UI layout or general illustration."
 metadata:
-  version: "2.24.4"
+  version: "2.25.0-single-grid.1"
 ---
 
 # JOESPIXEL
@@ -39,12 +39,14 @@ metadata:
 ## 제작 순서
 
 1. 원본 분석·캐릭터화: 캔버스, 점유율, 고정 팔레트와 재질 역할, 필수/생략 형태, 선 정책을 확정한다.
-2. 픽셀 크기 선정: 실제 격자 후보에서 전체 1도트 경계와 인접 색면·이목구비·틈이 함께 살아나는지 비교한 뒤 하나의 격자를 잠근다.
-3. 픽셀 설계 원안: 선택 격자에 넣을 형태를 설계한다. 생성 이미지의 선 폭을 실제 도트 규격으로 인정하지 않는다.
+2. 격자 수용력 검사: 사용자 고정 크기가 있으면 그 격자만 시험한다. 미지정이면 크기 후보를 비교한다. 전체 1도트 경계와 인접 색면·이목구비·틈이 함께 살아나는지 확인하고 격자를 잠근다.
+3. 비픽셀 원안 확인: 1단계에서 만든 매끈한 면·곡선 원안을 그대로 사용한다. 가짜 도트·계단·격자를 먼저 생성하지 않는다. 원안 변경 시 그 원안으로 수용력을 다시 검사한다.
 4. 재질·경계 배정: 원본 관찰로 영역을 구분하고 눈/머리/피부 경계 충돌을 별도 확인한다. 실행 가능한 배정표와 구분 PNG를 대조한다.
 5. 격자 초안 작성: `fixed-asset-grid/source-region-area`로 면과 선을 함께 배치한다. 외곽선은 `joint-source-band`와 `anchored-source-curve`를 사용한다. 이 native PNG가 실제 도트 규격을 가진 초안이다.
 6. 손실 수정: 원안과 격자 초안을 직접 비교한다. 결함은 공용 코드/관찰 입력에서 수정하고 새 실행으로 재배치한다. 수치 통과만으로 초안을 확정하지 않는다.
 7. 초안 확정·저장 검수: 전체/부위/실제 크기/정수 확대 검수 후 격자 초안을 잠근다. 저장은 잠긴 PNG 복사만 허용하며 도트 배열·확대본의 변경 0을 확인한다.
+
+신규 원안은 `illustration`이다. 1–4단계는 같은 원안 해시를 사용하고, 실제 픽셀 배열은 5단계에서 처음 만든다. 이미 정확한 native 격자를 가진 파일은 이 재변환 경로에 넣지 않는다. 원본 도트의 보존·정수 확대는 별도 작업이다.
 
 ## 변경할 수 없는 조건
 
