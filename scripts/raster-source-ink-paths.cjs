@@ -314,33 +314,67 @@ function allocateObservedStrokeLayout(PNG,source,base,palette,policy,locked=[],m
 
 // A source-observed stroke is geometry, not another area-vote color. Plan it
 // before fills are assigned; consumers decide which side owns vacated ink.
-function planSourceStroke(mask,sw,sh,grid,w,h,{closed=false}={}){
+function interiorAnchoredBand(mask,w,h){
+ // Use the observed enclosed face as the reference side. A broad attached
+ // mark must not pull this ring's medial cycle away from its enclosed shape.
+ // This is opt-in: ordinary strokes and deliberately filled eyes keep their
+ // existing layout. Width is measured in source pixels, never destination dots.
+ const originalTopology=strokeTopology(mask,w,h);if(originalTopology.components!==1||originalTopology.holes!==1)throw Error('Interior anchor needs one connected source ring and one interior');
+ let x0=w,y0=h,x1=0,y1=0;for(const p of mask){x0=Math.min(x0,p%w);x1=Math.max(x1,p%w);y0=Math.min(y0,p/w|0);y1=Math.max(y1,p/w|0);}
+ x0=Math.max(0,x0-1);y0=Math.max(0,y0-1);x1=Math.min(w-1,x1+1);y1=Math.min(h-1,y1+1);
+ const adj=p=>{const x=p%w,y=p/w|0;return[x>x0?p-1:-1,x<x1?p+1:-1,y>y0?p-w:-1,y<y1?p+w:-1].filter(q=>q>=0);};
+ const outside=new Set(),queue=[];for(let y=y0;y<=y1;y++)for(let x=x0;x<=x1;x++)if(x===x0||x===x1||y===y0||y===y1){const p=y*w+x;if(!mask.has(p)&&!outside.has(p)){outside.add(p);queue.push(p);}}
+ for(let i=0;i<queue.length;i++)for(const p of adj(queue[i]))if(!mask.has(p)&&!outside.has(p)){outside.add(p);queue.push(p);}
+ const inside=new Set();for(let y=y0;y<=y1;y++)for(let x=x0;x<=x1;x++){const p=y*w+x;if(!mask.has(p)&&!outside.has(p))inside.add(p);}
+ if(!inside.size)throw Error('Interior-anchored stroke needs a source interior');
+ const distance=seeds=>{const d=new Map(),q=[];for(const p of seeds)for(const v of adj(p))if(mask.has(v)&&!d.has(v)){d.set(v,1);q.push(v);}for(let i=0;i<q.length;i++)for(const v of adj(q[i]))if(mask.has(v)&&!d.has(v)){d.set(v,d.get(q[i])+1);q.push(v);}return d;};
+ const inner=distance(inside),outer=distance(outside),widths=[...mask].filter(p=>inner.get(p)===1).map(p=>outer.get(p)).sort((a,b)=>a-b);
+ if(!widths.length||widths.some(v=>!Number.isFinite(v)))throw Error('Interior stroke has incomplete opposite-side evidence');
+ const sourceWidth=widths[widths.length>>1],band=new Set([...mask].filter(p=>inner.get(p)<=sourceWidth));
+ const topology=strokeTopology(band,w,h);if(topology.components!==1||topology.holes!==1)throw Error('Interior-anchored source band changes its connections');
+ return {band,inside,report:{method:'observed-interior-band',sourceWidth,minimumWidth:widths[0],maximumWidth:widths.at(-1),sourcePixels:mask.size,centerlineBandPixels:band.size}};
+}
+function planSourceStroke(mask,sw,sh,grid,w,h,{closed=false,anchor}={}){
+ if(anchor!==undefined&&(anchor!=='interior'||!closed))throw Error('Interior anchor requires an observed closed stroke');
  if(!mask.size)throw Error('Source stroke has no observed pigment');
  const locate=(axis,v)=>{const a=grid[axis];let i=a.findIndex(([lo,hi])=>v>=lo&&v<hi);if(i<0)throw Error('Source stroke outside grid');return i+(v-a[i][0])/(a[i][1]-a[i][0]);};
  const step=grid.x[0][1]-grid.x[0][0];
  if(grid.x.length!==w||grid.y.length!==h||['x','y'].some(a=>grid[a].some(([lo,hi])=>Math.abs(hi-lo-step)>1e-8)))throw Error('Stroke geometry requires a uniform fixed grid');
- let pathMask=mask;
+ let pathMask=mask,anchorReport=null,anchored=null;
  if(closed){
   // A declared closed boundary owns its cycle, not terminal medial-axis spurs
   // created by a thick raster corner. Open strokes retain their real endpoints.
   if(strokeTopology(mask,sw,sh).holes!==1)throw Error('Declared closed stroke must enclose exactly one source interior');
+  anchored=anchor==='interior'?interiorAnchoredBand(mask,sw,sh):null;if(anchored)anchorReport=anchored.report;
+  if(!anchored){
   const core=new Set(thinMask(mask,sw)),graph=new Map();
   for(const p of core){const x=p%sw,y=Math.floor(p/sw),neighbors=new Set();for(let dy=-1;dy<=1;dy++)for(let dx=-1;dx<=1;dx++){const q=(y+dy)*sw+x+dx;if((dx||dy)&&x+dx>=0&&x+dx<sw&&y+dy>=0&&y+dy<sh&&core.has(q)&&(!dx||!dy||(!core.has(p+dx)&&!core.has(p+dy*sw))))neighbors.add(q);}graph.set(p,neighbors);}
   const queue=[...core].filter(p=>graph.get(p).size<2);for(let i=0;i<queue.length;i++){const p=queue[i];if(!core.delete(p))continue;for(const q of graph.get(p)){graph.get(q).delete(p);if(core.has(q)&&graph.get(q).size<2)queue.push(q);}}
   if(!core.size)throw Error('Closed stroke source cycle is missing');pathMask=core;
+  }
  }
- const paths=traceStrokePaths(pathMask,sw,sh,p=>[locate('x',p%sw+.5),locate('y',Math.floor(p/sw)+.5)],1/step,.15,1);
+ const paths=anchored?[]:traceStrokePaths(pathMask,sw,sh,p=>[locate('x',p%sw+.5),locate('y',Math.floor(p/sw)+.5)],1/step,.15,1);
  let cells=new Set();for(const path of paths)for(let i=1;i<path.length;i++)for(const[x,y]of rasterPath(path[i-1],path[i],false)){
   if(x<0||x>=w||y<0||y>=h)throw Error('Stroke path exceeds canvas');cells.add(y*w+x);
  }
  cells=new Set(thinMask(cells,w));cells=coalesceStrokeJunctions(cells,paths,w,h,new Set()).cells;
  const footprint=new Set();for(const p of mask)footprint.add(Math.floor(locate('y',Math.floor(p/sw)+.5))*w+Math.floor(locate('x',p%sw+.5)));
+ if(anchored){
+  // Allocate the enclosed face and its one-cell outer rim together. The
+  // medial axis of attached ink is not the boundary of the observed face.
+  const votes=new Map();for(const p of anchored.inside){const q=Math.floor(locate('y',Math.floor(p/sw)+.5))*w+Math.floor(locate('x',p%sw+.5));votes.set(q,(votes.get(q)||0)+1);}
+  const face=new Set([...votes].filter(([p,count])=>{const x=p%w,y=p/w|0;return count>step*step/2||count===step*step/2&&anchored.inside.has(Math.floor((grid.y[y][0]+grid.y[y][1])/2)*sw+Math.floor((grid.x[x][0]+grid.x[x][1])/2));}).map(([p])=>p));
+  if(!face.size)throw Error('Enclosed source face has no capacity in the locked grid');
+  const shell=new Set();for(const p of face){const x=p%w,y=p/w|0;for(const q of[x?p-1:-1,x+1<w?p+1:-1,y?p-w:-1,y+1<h?p+w:-1])if(q>=0&&!face.has(q))shell.add(q);}
+  cells=new Set(thinMask(shell,w));
+  anchorReport={...anchorReport,placement:'joint-interior-and-outer-rim',nativeFaceCells:face.size};
+ }
  if(!cells.size||[...cells].some(p=>!footprint.has(p)))throw Error('Stroke cannot fit inside observed source coverage');
  const sourceTopology=strokeTopology(mask,sw,sh),nativeTopology=strokeTopology(cells,w,h);
  if(sourceTopology.components!==nativeTopology.components||sourceTopology.holes!==nativeTopology.holes){const error=Error('Stroke grid capacity changes source connections or gaps: '+JSON.stringify({sourceTopology,nativeTopology}));error.strokePlan={mask:[...mask],cells:[...cells],paths};throw error;}
  const blocks=[...cells].filter(p=>p%w+1<w&&p+w+1<w*h&&[p+1,p+w,p+w+1].every(q=>cells.has(q)));
  if(blocks.length)throw Error('Stroke path contains solid two-cell thickness');
- return {cells,footprint,paths,sourceTopology,nativeTopology};
+ return {cells,footprint,paths,sourceTopology,nativeTopology,...(anchorReport?{anchorReport}:{})};
 }
 // Joint allocation of an observed OPEN curve. Source windows identify the
 // meaningful ends/turns; skeleton burrs never become protected output dots.
@@ -431,4 +465,4 @@ function strokeTopology(mask,w,h){
  const visit=(foreground)=>{const seen=new Set();let count=0,holes=0;for(let y=y0;y<=y1;y++)for(let x=x0;x<=x1;x++){const p=y*w+x;if(mask.has(p)!==foreground||seen.has(p))continue;count++;const q=[p];seen.add(p);let edge=false;for(let i=0;i<q.length;i++){const a=q[i]%w,b=Math.floor(q[i]/w);edge ||= a===x0||a===x1||b===y0||b===y1;for(let dy=-1;dy<=1;dy++)for(let dx=-1;dx<=1;dx++){const u=a+dx,v=b+dy,n=v*w+u;if(!(dx||dy)||(!foreground&&dx&&dy)||u<x0||u>x1||v<y0||v>y1||seen.has(n)||mask.has(n)!==foreground)continue;seen.add(n);q.push(n);}}if(!edge)holes++;}return {count,holes};};
  return {components:visit(true).count,holes:visit(false).holes};
 }
-module.exports={rasterSourceInkPaths,rasterPath,traceStrokePaths,allocateObservedStrokeLayout,auditObservedStrokeLayout,coalesceStrokeJunctions,matchesObservedInk,planSourceStroke,planObservedCurve,strokeTopology};
+module.exports={rasterSourceInkPaths,rasterPath,traceStrokePaths,allocateObservedStrokeLayout,auditObservedStrokeLayout,coalesceStrokeJunctions,matchesObservedInk,planSourceStroke,planObservedCurve,strokeTopology,interiorAnchoredBand};

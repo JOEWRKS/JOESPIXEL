@@ -180,4 +180,34 @@ test('clipped closed-eye ownership cannot exempt a parallel old rim as unknown c
  const typedResult=applyEyePolicy(PNG,s,b,palette,typed,g);assert.equal(auditEyePolicy(PNG,s,typedResult.image,palette,typed,g).status,'PASS');
  typed.eyes[0].roles[0].interiorRoles=['rim'];assert.throws(()=>assertEyePolicy(typed,palette),/observed non-stroke/);
 });
+test('attached same-pigment mark cannot pull an interior-anchored closed eye away from its face',()=>{
+ const pal=parsePalette({colors:['#FFFFFF','#101010','#3080A0']}),shape=[[0,0],[80,0],[80,80],[0,80]],grid={x:Array.from({length:20},(_,x)=>[x*4,x*4+4]),y:Array.from({length:20},(_,y)=>[y*4,y*4+4])};
+ const p={version:1,visibility:'visible',placement:'source-partitions',geometryPolicy:'source-stroke-fill',observation:'A lens and an attached upper mark share pigment but not geometry.',eyes:[{name:'lens',rect:[0,0,80,80],sourcePolygon:shape,reflection:'off',baseRoles:['rim','lens','white','mark'],contextRoles:['white'],partitions:[{name:'observed lens group',sourcePolygon:shape,roles:['rim','lens','white','mark'],observation:'Source pigment and source-side split.'}],roles:[
+  {name:'rim',family:'rim',geometry:'stroke',width:1,closed:true,anchor:'interior',interiorRoles:['lens'],attachedFill:{role:'mark',sourcePolygon:[[0,0],[80,0],[80,30],[0,30]],observation:'Observed broad attached pigment above lens.'},color:'#101010',colors:['#101010'],samples:[[16,16,16]]},
+  {name:'lens',family:'lens',geometry:'fill',color:'#3080A0',colors:['#3080A0'],samples:[[48,128,160]]},
+  {name:'white',family:'white',geometry:'fill',color:'#FFFFFF',colors:['#FFFFFF'],samples:[[255,255,255]],required:false},
+  {name:'mark',family:'mark',geometry:'fill',color:'#101010',colors:['#101010'],samples:[[16,16,16]],required:false}
+ ]}]};
+ const run=attached=>{const s=new PNG({width:80,height:80});s.data.fill(255);for(let y=0;y<80;y++)for(let x=0;x<80;x++){const radius=Math.hypot(x+.5-40,y+.5-40);s.data.writeUInt32BE(radius<16?0x3080a0ff:radius<24||attached&&x>=20&&x<60&&y>=6&&y<24?0x101010ff:0xffffffff,(y*80+x)*4);}const b=buildNative(PNG,s,pal,20,20,'#FFFFFF','area-vote').image;return {s,b,result:applyEyePolicy(PNG,s,b,pal,p,grid)};};
+ const clean=run(false),attached=run(true),a=clean.result.report.eyes[0],b=attached.result.report.eyes[0];
+ assert.deepEqual(b.geometry.strokes[0].cells,a.geometry.strokes[0].cells,'same enclosed face must get the same rim despite the upper ink mass');
+ assert(b.attachments[0].assignedFillSourcePixels>0);assert(b.roles.find(r=>r.name==='mark').nativeCells>0,'preserve the actual attached mark as fill');
+ assert.equal(b.roles.find(r=>r.name==='lens').nativeCells,a.roles.find(r=>r.name==='lens').nativeCells,'attached mark cannot consume the lens');
+ assert.equal(auditEyePolicy(PNG,attached.s,attached.result.image,pal,p,grid).status,'PASS');
+ assert.equal(attached.result.image.data.readUInt32BE(0),0xffffffff,'outside remains unchanged');
+ const fringe=PNG.sync.read(PNG.sync.write(attached.s));for(let y=0;y<4;y++)for(let x=0;x<4;x++)fringe.data.writeUInt32BE(0x3080a0ff,(y*80+x)*4);
+ const semantic=applyEyePolicy(PNG,fringe,attached.b,pal,p,grid);
+ assert.equal(semantic.image.data.readUInt32BE(0),0xffffffff,'outside the observed closed face, an iris-like tone must use the declared context role');
+ assert.equal(auditEyePolicy(PNG,fringe,semantic.image,pal,p,grid).status,'PASS');
+ assert.deepEqual(semantic.report.eyes[0].geometry.strokes[0].cells,b.geometry.strokes[0].cells,'semantic context allocation cannot move the rim');
+ const partial=structuredClone(p);partial.eyes[0].sourcePolygon=[[0,14],[80,14],[80,80],[0,80]];
+ const edge=applyEyePolicy(PNG,attached.s,attached.b,pal,partial,grid);
+ assert.equal(auditEyePolicy(PNG,attached.s,edge.image,pal,partial,grid).status,'PASS','a partially owned cell must retain explicit source attachment provenance');
+ assert.deepEqual(edge.report.eyes[0].geometry.strokes[0].cells,b.geometry.strokes[0].cells);
+ const bad=structuredClone(p);bad.eyes[0].roles[0].closed=false;assert.throws(()=>assertEyePolicy(bad,pal),/interior anchor/);
+ const wrong=structuredClone(p);wrong.eyes[0].roles[0].attachedFill.role='lens';assert.throws(()=>assertEyePolicy(wrong,pal),/same-pigment fill/);
+ const missing=structuredClone(p);delete missing.eyes[0].roles[0].interiorRoles;assert.throws(()=>assertEyePolicy(missing,pal),/interior anchor/);
+ const remapped=require('./eye-plane-policy.cjs').remapEyePolicy(p,grid);assert.deepEqual(remapped.eyes[0].roles[0].attachedFill.sourcePolygon,[[0,0],[20,0],[20,7.5],[0,7.5]]);assertEyePolicy(remapped,pal);assert.equal(p.eyes[0].roles[0].attachedFill.sourcePolygon[1][0],80,'remap must not mutate source observations');
+ const painted=structuredClone(p);painted.eyes[0].roles[0].attachedFill.nativeCells=[1];assert.throws(()=>assertEyePolicy(painted,pal),/observed same-pigment/);
+});
 console.log(n+' eye policy checks passed');
