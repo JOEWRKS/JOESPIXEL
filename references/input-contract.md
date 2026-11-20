@@ -62,9 +62,17 @@ node scripts/run-pixel-workflow.cjs verify /absolute/path/new-run
 | `outlinePolicy` | 외곽선을 사용하는 경우 아래의 공동 배치 정책 |
 | `materialPlan` | 배정 계획 JSON의 파일 증거 |
 | `pixelDecision`, `outlineDecision` | 선택한 규격과 이유. 외곽선 정식 경로는 `mode: continuous`, `width: 1`, `colorPolicy: darker-local-material` |
-| `features` | `{id, sourceObservation, criterion}` 목록. 캐릭터는 `eyes/nose/mouth/skin/outline` 필수. 손·접촉 등 실제 필요한 항목을 추가 |
+| `features` | `{id, sourceObservation, criterion, placement?}` 목록. 캐릭터는 `eyes/nose/mouth/skin/outline` 필수. 손·접촉 등 실제 필요한 항목을 추가. `placement`는 아래 참고 |
 | `requiredFindings` | 사용자가 지적한 미해결 결함 ID 목록. 이후 검수에서 누락 금지 |
 | `stageChecks` | `version: 4`, 1–5단계의 완료 기록. 해당 파일·실행 입력·배정표·공동 배치 증거를 결속 |
+
+`features[].placement`는 그 특징을 격자가 **어떻게** 지키는지 밝힌다. 반 칸보다 얇은 내부 표식(코, 눈썹, 주름)은 면적 투표에서 지고, 목록에 기준이 있어도 아무 정책이 배치하지 않으면 조용히 사라진다.
+
+- `{route:"formPolicy", feature:"<이름>"}`: `formPolicy`가 선언한 선. 실행 뒤 그 선의 칸이 0이면 중단.
+- `{route:"measured", sourceRegion:[x,y,w,h], color:"#RRGGBB"}`: 일반 면적·외곽선 배치로 남는다고 관찰한 표식. 실행 뒤 영역 아래 칸에 그 색이 하나도 없으면 중단. 영역은 표식 자체에 둔다. 같은 색의 다른 선이 들어가면 검사가 무의미해진다.
+- `{route:"omitted", reason:"..."}`: 이 격자에서 빼기로 한 결정. `run.json`의 `featurePlacement`에 남아 검수에서 보인다.
+
+캐릭터의 `nose`·`mouth`는 경로가 필수다. 측정 통과는 표식이 남았다는 뜻일 뿐 바르게 읽힌다는 뜻이 아니다.
 
 부분 수정은 선택적으로 `baseline`, `allowedRects`, `protectedRects`를 선언하여 영역 밖 불변을 검사한다. 이 사각형은 **수정 범위 제한**이며 목적지 도트를 칠하는 지시가 아니다. 부분 수정의 기술적 불변을 형태 개선으로 보고하지 않는다.
 
@@ -151,7 +159,8 @@ node scripts/run-pixel-workflow.cjs verify /absolute/path/new-run
 
 `regions`가 비어 있으면 재질 제약이 없어서, 색이 비슷한 다른 재질의 팔레트색이 고립 칸으로 섞인다(예: 가죽 주머니에 머리색, 렌치에 흰자색). 이를 막으려면 재질표를 관찰하고 `scripts/derive-material-regions.cjs`로 영역을 만든다.
 
-- 재질표: `[{material, colors, baseColor, observation}]`. 어느 팔레트색이 어느 재질을 이루는지만 적는다.
+- 재질표: `[{material, colors, baseColor, observation, lineMarks?}]`. 어느 팔레트색이 어느 재질을 이루는지만 적는다.
+- 얇은 선 표식: 중심이 평평하지 않은 3~4px 선(코, 눈썹, 주름)은 평면 씨앗이 없어 주변 면 재질로 넘어간다. 그러면 색 배정에서 잉크가 아니게 되어 외곽선 배치가 보지 못한다. 선 재질에 `lineMarks: [{name, sourceRegion, samples, contextSamples, observation}]`를 관찰해 적으면, 영역 안에서 주변 표본보다 선 표본에 가까운 화소가 그 재질의 씨앗이 된다. 도구는 표식을 스스로 찾지 않는다. 표식이 외곽선에 붙어 있으면 `formPolicy`는 외곽선 가장자리까지 한 성분으로 잡혀 영역을 벗어나므로, 이 경로를 쓴다.
 - 공간 결정: 이어진 평면 영역마다 한 번 다수결로 재질을 정하고, 전이 화소(안티앨리어싱)는 가장 가까운 평면 영역을 따른다.
 - 여러 재질이 쓰는 색: 씨앗에서 제외하고 주변을 따른다. 예: 흰 옷과 눈 흰자가 같은 색인 경우.
 - 출력: `{regions, inventory}`를 계획에 넣고, 함께 나오는 지도 PNG를 원안과 대조한다.

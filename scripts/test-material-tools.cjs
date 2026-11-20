@@ -37,6 +37,15 @@ test('every region is listed in the generated inventory',()=>{
 test('a colour without a material is rejected',()=>{
  assert.throws(()=>derive(image(()=>[255,255,255]),palette,materials.slice(0,3)),/without a material/);
 });
+test('a declared thin line mark seeds its line material; undeclared it goes to the fill',()=>{
+ // Antialiased 3px stroke inside leather: its darkest pixels are never flat, so flat seeding alone
+ // gives the whole stroke to leather. The observer declares it as a line mark of ink.
+ const s=image((x,y)=>y===5?[60,40,30]:y===4||y===6?[120,80,50]:[160,90,54]);
+ const plain=derive(s,palette,materials,{flat:12});assert.equal(label(plain,10,5),'leather');
+ const marked=materials.map(m=>m.material==='ink'?{...m,lineMarks:[{name:'seam',sourceRegion:[2,3,20,5],samples:[[60,40,30]],contextSamples:[[160,90,54]],observation:'Thin dark seam across the pouch.'}]}:m);
+ const r=derive(s,palette,marked,{flat:12});assert.equal(label(r,10,5),'ink');assert.equal(label(r,10,8),'leather');assert.deepEqual(r.lineMarks,[{material:'ink',name:'seam',pixels:20}]);
+ assert.throws(()=>derive(s,palette,materials.map(m=>m.material==='ink'?{...m,lineMarks:[{name:'none',sourceRegion:[2,8,5,2],samples:[[60,40,30]],contextSamples:[[160,90,54]],observation:'x'}]}:m)),/no source pixels/);
+});
 test('capacity probe keeps the same canvas and writes one-dot ink on the exterior',()=>{
  const s=image((x,y)=>x>=6&&x<18&&y>=3&&y<9?[160,90,54]:[255,255,255]);
  const [a,b]=probe(s,palette,{background:'#FFFFFF',ink:['#202020'],candidates:[[12,6],[6,3]]});

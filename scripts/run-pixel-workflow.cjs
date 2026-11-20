@@ -47,6 +47,8 @@ function sourceGate(contract, PNG) {
   need(Array.isArray(contract.features) && contract.features.length, 'Source feature inventory required');
   if(contract.kind==='character') for(const role of ['eyes','nose','mouth','skin','outline'])
     need(contract.features.some(f=>f.id===role && f.sourceObservation && f.criterion), 'Missing character criterion: '+role);
+  const size=PNG.sync.read(fs.readFileSync(contract.source.path));
+  require('./feature-placement.cjs').assertFeaturePlacement(contract,parsePalette(read(contract.palette.path)),[size.width,size.height]);
 }
 function prepare(jobPath, outputDir, PNG) {
   const job=read(jobPath), contract=read(job.contract);
@@ -68,6 +70,7 @@ function prepare(jobPath, outputDir, PNG) {
     const planned=read(contract.stageChecks.stages[4].layout.path).layouts;
     const executed=(built.outlineReport?.surfaceLayout??[]).filter(s=>s.jointLayout).map(s=>s.jointLayout);
     need(JSON.stringify(executed)===JSON.stringify(planned),'Rendered line-plane allocation differs from the reviewed stage 5 plan');
+    built.featurePlacement=require('./feature-placement.cjs').measureFeaturePlacement(contract,built.image,built.formReport);
     trace.finish('CONVERSION_COMPLETED_REQUIRES_VISUAL_REVIEW');
   }catch(error){trace.finish('CONVERSION_FAILED',error.message);throw error;}
   const {fit}=built, map=contract.sourceToNative;
@@ -83,7 +86,7 @@ function prepare(jobPath, outputDir, PNG) {
   const input=path.join(outputDir,'conversion.json');write(input,job);
   const manifest={version:2,status:'GRID_DRAFT_AWAITING_REVIEW',contract:artifact(contractPath),conversion:artifact(input),
     source:contract.source,palette:contract.palette,baseline,native,expanded,converters:converters(),stats,fit,
-    materialReport:built.materialReport??null,structureReport:built.structureReport??null,sourceRegionReport:built.sourceRegionReport??null,shapeRasterReport:built.shapeRasterReport??null,eyePolicyReport:built.eyePolicyReport,formReport:built.formReport??null,outlineReport:built.outlineReport??null,
+    materialReport:built.materialReport??null,structureReport:built.structureReport??null,sourceRegionReport:built.sourceRegionReport??null,shapeRasterReport:built.shapeRasterReport??null,eyePolicyReport:built.eyePolicyReport,formReport:built.formReport??null,featurePlacement:built.featurePlacement,outlineReport:built.outlineReport??null,
     savedEyeAudit:require('./eye-plane-policy.cjs').auditEyePolicy(PNG,source,saved,palette,contract.eyePolicy,require('./eye-plane-policy.cjs').affineEyeGrid(source,saved,fit),built.materialContext),manualOutputEdits:0};
   write(path.join(outputDir,'run.json'),manifest);
   const pending=()=>({status:'UNVERIFIED',observation:'Direct comparison of saved PNG against source required.',evidence:[],comparison:{sourceRegion:null,difference:'',criterion:'',reason:''}});

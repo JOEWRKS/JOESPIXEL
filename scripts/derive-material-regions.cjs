@@ -13,9 +13,16 @@
 // node scripts/derive-material-regions.cjs --source S.png --palette P.json --materials M.json
 //   --out regions.json --map map.png [--flat 12]
 // M.json: [{"material":"skin","colors":["#FECAA5","#A37158"],"baseColor":"#FECAA5","observation":"..."}]
+// A line material may list observed lineMarks: thin source lines (a nose tick, a brow, a crease)
+// whose core is never flat at this resolution, so flat seeding alone hands every pixel of them to
+// the surrounding fill. Inside each declared sourceRegion, pixels nearer the observed line
+// samples than the context samples seed the line material. The observer declares the marks;
+// the tool never searches for them.
+//   "lineMarks":[{"name":"nose","sourceRegion":[x,y,w,h],"samples":[[r,g,b]],"contextSamples":[[r,g,b]],"observation":"..."}]
 const fs=require('node:fs');
 const {PNG}=require(require.resolve('pngjs',{paths:[__dirname,process.cwd()]}));
 const {parsePalette}=require('./build-palette-native.cjs');
+const {sourceStrokeClassifier}=require('./raster-observed-details.cjs');
 
 function derive(source,palette,materials,{flat=12}={}){
  // A colour may serve several materials (a white top and an eye white, a shirt shadow and
@@ -41,6 +48,14 @@ function derive(source,palette,materials,{flat=12}={}){
   for(let q=0;q<area.length;q++){const p=area[q],x=p%w,y=Math.floor(p/w);for(const [dx,dy] of [[1,0],[-1,0],[0,1],[0,-1]]){const a=x+dx,b=y+dy;if(a<0||b<0||a>=w||b>=h)continue;const n=b*w+a;if(isFlat[n]&&!seen[n]&&diff(p*4,n*4)<=flat){seen[n]=1;area.push(n);}}}
   const votes=new Map();for(const p of area){const o=owner[nearest(p*4)];if(o>=0)votes.set(o,(votes.get(o)||0)+1);}
   if(!votes.size)continue;areas++;const m=[...votes].sort((a,b)=>b[1]-a[1]||a[0]-b[0])[0][0];for(const p of area){label[p]=m;queue.push(p);}}
+ const lineMarks=[];
+ materials.forEach((m,mi)=>{if(m.lineMarks===undefined)return;if(!Array.isArray(m.lineMarks)||!m.lineMarks.length)throw Error('lineMarks must be a non-empty list: '+m.material);
+  for(const mark of m.lineMarks){const [x0,y0,rw,rh]=mark.sourceRegion??[];
+   if(!mark.name||!mark.observation||![x0,y0,rw,rh].every(Number.isSafeInteger)||x0<0||y0<0||rw<1||rh<1||x0+rw>w||y0+rh>h)throw Error('Line mark needs name, observation and a source region inside the source: '+JSON.stringify(mark.name));
+   const isLine=sourceStrokeClassifier(mark);let pixels=0;
+   for(let y=y0;y<y0+rh;y++)for(let x=x0;x<x0+rw;x++){const p=y*w+x;if(!isLine([d[p*4],d[p*4+1],d[p*4+2]]))continue;if(label[p]!==mi){label[p]=mi;queue.push(p);}pixels++;}
+   if(!pixels)throw Error('Line mark has no source pixels nearer its samples than its context: '+mark.name);
+   lineMarks.push({material:m.material,name:mark.name,pixels});}});
  if(!queue.length)throw Error('Source has no flat pixels to seed materials');
  for(let q=0;q<queue.length;q++){const p=queue[q],x=p%w,y=Math.floor(p/w);for(const [dx,dy] of [[1,0],[-1,0],[0,1],[0,-1]]){const a=x+dx,b=y+dy;if(a<0||b<0||a>=w||b>=h)continue;const n=b*w+a;if(label[n]<0){label[n]=label[p];queue.push(n);}}}
  const regions=[],counts=materials.map(()=>0);
@@ -48,7 +63,7 @@ function derive(source,palette,materials,{flat=12}={}){
   regions.push({id:`${mat.material}-${counts[m]++}`,material:mat.material,polygon:[[x,y],[e,y],[e,y+1],[x,y+1]],colors:mat.colors,baseColor:mat.baseColor,boundaryRoles:[],observation:mat.observation??'Material table observation; each connected flat area votes once and transition pixels take the nearest area.'});x=e;}}
  const map=new PNG({width:w,height:h});for(let p=0;p<w*h;p++){const c=rgb[hex.get(materials[label[p]].baseColor)];map.data.set([...c,255],p*4);}
  const inventory=materials.map(m=>({id:m.material,decision:'assigned',regionIds:regions.filter(r=>r.material===m.material).map(r=>r.id),observation:m.observation??'Material table observation.'})).filter(i=>i.regionIds.length);
- return {regions,inventory,map,summary:materials.map((m,i)=>({material:m.material,rows:counts[i],pixels:label.reduce((s,v)=>s+(v===i),0)}))};
+ return {regions,inventory,map,lineMarks,summary:materials.map((m,i)=>({material:m.material,rows:counts[i],pixels:label.reduce((s,v)=>s+(v===i),0)}))};
 }
 module.exports={derive};
 
@@ -57,5 +72,5 @@ if(require.main===module){
  for(const k of ['source','palette','materials','out','map'])if(!o[k])throw Error('Missing --'+k);
  const r=derive(PNG.sync.read(fs.readFileSync(o.source)),parsePalette(JSON.parse(fs.readFileSync(o.palette))),JSON.parse(fs.readFileSync(o.materials)),{flat:o.flat?+o.flat:12});
  fs.writeFileSync(o.out,JSON.stringify({regions:r.regions,inventory:r.inventory})+'\n',{flag:'wx'});fs.writeFileSync(o.map,PNG.sync.write(r.map),{flag:'wx'});
- console.log(JSON.stringify({regions:r.regions.length,materials:r.summary},null,1));
+ console.log(JSON.stringify({regions:r.regions.length,lineMarks:r.lineMarks,materials:r.summary},null,1));
 }
