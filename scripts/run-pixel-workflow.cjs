@@ -25,7 +25,7 @@ function sourceGate(contract, PNG) {
   require('./stage-gates.cjs').assertProductionStages(contract.stageChecks,2,{pixelSourceSha256:contract.source?.sha256,paletteSha256:contract.palette?.sha256,grid:{canvas:[contract.width*contract.scale,contract.height*contract.scale],cell:contract.scale,native:[contract.width,contract.height],origin:[0,0]}});
   need(contract.stageChecks?.stages?.[0]?.execution?.sampling === 'source-region-area', 'Production requires source-region-area');
   require('./eye-plane-policy.cjs').assertEyePolicy(contract.eyePolicy,parsePalette(read(contract.palette.path)));
-  need(contract.eyePolicy.visibility!=='visible'||contract.eyePolicy.placement==='source-partitions','New visible-eye production requires observed source-partitions; color cleanup alone cannot approve eye shape');
+  need(contract.eyePolicy.visibility!=='visible'||['source-partitions','source-construction'].includes(contract.eyePolicy.placement),'New visible-eye production requires observed source-partitions or source-construction; color cleanup alone cannot approve eye shape');
     need(contract.eyePolicy.visibility!=='visible'||contract.eyePolicy.geometryPolicy==='source-stroke-fill','New visible-eye production requires explicit source-stroke-fill geometry; protected eyes are not exempt from stroke checks');
     need(!contract.formPolicy?.features?.some(f=>f.kind==='stroke')||contract.formPolicy.placement==='source-path','New internal stroke production requires source-path placement');
     need(!contract.formPolicy?.features?.some(f=>f.kind==='stroke'&&f.priority==='required'&&!f.curve),'Required internal strokes need observed curve landmarks before production');

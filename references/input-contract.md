@@ -4,7 +4,7 @@
 
 ## 실행 명령
 
-새 눈 입력은 `placement: "source-partitions"`, `geometryPolicy: "source-stroke-fill"`을 함께 지정한다. 각 역할의 `geometry`는 `stroke`(선), `fill`(동공·홍채 등 면), `feature`(반사광 등) 중 하나다. 선만 `width: 1`을 요구한다. `closed: true`는 실제로 하나의 내부를 둘러싼 테두리에만 사용하며, 옆 무늬나 눈썹을 같은 테두리로 묶지 않는다. 같은 어두운 RGB라도 동공 면과 테두리는 공간 관찰로 구분한다. 입력 누락·선 연결/틈 손실·필수 면 소실은 차단한다.
+새 눈 입력은 `placement: "source-partitions"`(또는 측정 후 구성하는 `"source-construction"`, [설계](eye-construction-design.md)), `geometryPolicy: "source-stroke-fill"`을 함께 지정한다. 각 역할의 `geometry`는 `stroke`(선), `fill`(동공·홍채 등 면), `feature`(반사광 등) 중 하나다. 선만 `width: 1`을 요구한다. `closed: true`는 실제로 하나의 내부를 둘러싼 테두리에만 사용하며, 옆 무늬나 눈썹을 같은 테두리로 묶지 않는다. 같은 어두운 RGB라도 동공 면과 테두리는 공간 관찰로 구분한다. 입력 누락·선 연결/틈 손실·필수 면 소실은 차단한다.
 
 눈 테두리의 소유 다각형은 원본 선 단면 전체를 포함해야 한다. 내부 색면에서 임의의 고정 폭만 넓혀 정하지 않는다. 닫힌 테두리 역할에는 필요시 `interiorRoles`로 실제 안쪽의 면·반사 역할 이름을 지정하여 바깥 피부/얼굴색 유입을 막는다. 출처 미정의 주변 잉크는 두께 검사에서 면제하지 않는다. 같은 색의 실제 주변 채움은 별도 눈 역할 또는 재질 계획의 `geometry: "fill"` 관찰로 구분한다.
 

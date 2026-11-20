@@ -31,9 +31,9 @@ function eyeOwnership(source,policy,width,height){
 }
 function assertEyePolicy(policy,palette){
  if(policy?.version!==1||!['visible','not-visible'].includes(policy.visibility)||typeof policy.observation!=='string'||!policy.observation.trim())throw Error('Explicit observed eyePolicy required');
- if(policy.placement!==undefined&&policy.placement!=='source-partitions')throw Error('Unsupported eye placement mode');
+ if(policy.placement!==undefined&&!['source-partitions','source-construction'].includes(policy.placement))throw Error('Unsupported eye placement mode');
  if(policy.geometryPolicy!==undefined&&policy.geometryPolicy!=='source-stroke-fill')throw Error('Unsupported eye geometry policy');
- if(policy.geometryPolicy&&policy.placement!=='source-partitions')throw Error('Eye geometry requires source partitions');
+ if(policy.geometryPolicy&&!['source-partitions','source-construction'].includes(policy.placement))throw Error('Eye geometry requires source partitions');
  if(policy.visibility==='not-visible'){
   if(policy.eyes?.length)throw Error('Hidden eyes cannot have correction regions');return policy;
  }
@@ -52,12 +52,12 @@ function assertEyePolicy(policy,palette){
    if(r.anchor!==undefined&&(r.anchor!=='interior'||r.closed!==true||!r.interiorRoles?.length))throw Error('Eye interior anchor requires a closed stroke with observed interior roles');
    if(!policy.geometryPolicy&&r.geometry!==undefined)throw Error('Eye geometry annotation cannot be silently ignored');
    if(r.shape!==undefined&&(!['source-oval','source-family-oval'].includes(r.shape)||r.geometry!=='fill'||r.protect!==true||policy.geometryPolicy!=='source-stroke-fill'))throw Error('Observed oval shape requires a protected source fill');
-   if(!r.name||!allowed.has(r.color)||!r.colors?.length||!r.colors.includes(r.color)||r.colors.some(c=>!allowed.has(c)||(policy.placement!=='source-partitions'&&seen.has(c))))throw Error('Eye role colors must be unambiguous fixed palette entries');
+   if(!r.name||!allowed.has(r.color)||!r.colors?.length||!r.colors.includes(r.color)||r.colors.some(c=>!allowed.has(c)||(!['source-partitions','source-construction'].includes(policy.placement)&&seen.has(c))))throw Error('Eye role colors must be unambiguous fixed palette entries');
    r.colors.forEach(c=>seen.add(c));
    if(!r.samples?.length||r.samples.some(a=>!Array.isArray(a)||a.length!==3||a.some(v=>!Number.isFinite(v)||v<0||v>255)))throw Error('Observed source RGB samples required');
-   if(r.verifySampleOwnership!==undefined&&(typeof r.verifySampleOwnership!=='boolean'||policy.placement!=='source-partitions'||r.verifySampleOwnership&&(!r.samplePoints?.length||r.samplePoints.length!==r.samples.length)))throw Error('Semantic eye samples require source partitions and matching sample points');
+   if(r.verifySampleOwnership!==undefined&&(typeof r.verifySampleOwnership!=='boolean'||!['source-partitions','source-construction'].includes(policy.placement)||r.verifySampleOwnership&&(!r.samplePoints?.length||r.samplePoints.length!==r.samples.length)))throw Error('Semantic eye samples require source partitions and matching sample points');
   }
-  if(policy.placement==='source-partitions'){
+  if(['source-partitions','source-construction'].includes(policy.placement)){
    const names=new Set(e.roles.map(r=>r.name)),validPolygon=p=>Array.isArray(p)&&p.length>=3&&p.every(v=>Array.isArray(v)&&v.length===2&&v.every(Number.isFinite)&&v[0]>=e.rect[0]&&v[0]<=e.rect[0]+e.rect[2]&&v[1]>=e.rect[1]&&v[1]<=e.rect[1]+e.rect[3]);
    for(const r of e.roles)if(r.attachedFill){const a=r.attachedFill,target=e.roles.find(v=>v.name===a.role);if(Object.keys(a).some(k=>!['role','sourcePolygon','observation'].includes(k))||r.anchor!=='interior'||!a.observation?.trim()||!validPolygon(a.sourcePolygon)||target?.geometry!=='fill'||target.color!==r.color||target.family===r.family)throw Error('Attached source mark requires an observed same-pigment fill and interior-anchored ring');}
    for(const r of e.roles)if(r.interiorRoles!==undefined&&(!r.closed||!Array.isArray(r.interiorRoles)||!r.interiorRoles.length||r.interiorRoles.some(name=>!e.roles.some(v=>v.name===name&&v.geometry!=='stroke'))))throw Error('Closed eye interior must name observed non-stroke roles');
@@ -80,7 +80,7 @@ function applyEyePolicy(PNG,source,baseline,palette,policy,grid,material=null){
  if(policy.visibility==='not-visible')return {image,report:{status:'NOT_APPLICABLE',observation:policy.observation,changed:0,eyes:[]}};
  if(grid?.x?.length!==baseline.width||grid?.y?.length!==baseline.height)throw Error('Eye/source grid mismatch');
  for(const axis of ['x','y'])if(grid[axis].some(v=>v.length!==2||!v.every(Number.isFinite)||v[1]<=v[0]))throw Error('Invalid eye grid');
- if(policy.placement==='source-partitions')return placeSourceEyePartitions(PNG,source,baseline,palette,policy,grid,material);
+ if(['source-partitions','source-construction'].includes(policy.placement))return placeSourceEyePartitions(PNG,source,baseline,palette,policy,grid,material);
  const dist=(a,b)=>a.reduce((s,v,i)=>s+(v-b[i])**2,0),reports=[],claimed=new Set();
  for(const e of policy.eyes){
   const [rx,ry,rw,rh]=e.rect;if(rx+rw>source.width||ry+rh>source.height)throw Error('Eye region outside source');
@@ -260,7 +260,12 @@ function placeSourceEyePartitions(PNG,source,baseline,palette,policy,grid,materi
    // is not evidence that every antialiased edge sample belongs to its fill.
    // Observed surrounding fills may compete; equal RGB stays with the
    // partition, so white glints and dark pupils keep their intended role.
-   const primary=parts[0]?.roles??eye.baseRoles,allowed=[...new Set([...primary,...(eye.contextRoles??[])])],q=y*source.width+x;
+   // Construction measures planes, so outside the partitions the fill roles
+   // whose colour the base roles do not paint compete by colour as well; the
+   // lid band is then measured on lid pigment, not on sclera or skin.
+   const construction=policy.placement==='source-construction',baseColors=construction&&!parts.length?new Set(eye.baseRoles.map(n=>eye.roles.find(v=>v.name===n).color)):null;
+   const openFills=baseColors?eye.roles.filter(r=>r.geometry!=='stroke'&&!baseColors.has(r.color)).map(r=>r.name):[];
+   const primary=parts[0]?.roles??eye.baseRoles,allowed=[...new Set([...primary,...(eye.contextRoles??[]),...openFills])],q=y*source.width+x;
    // A partition decides between coincident pigments (pupil vs lid ink); it
    // does not recolour pigment it does not list. The large eye's black outer
    // contour inside an iris partition used to become dark iris (a dark block
@@ -270,7 +275,7 @@ function placeSourceEyePartitions(PNG,source,baseline,palette,policy,grid,materi
    // than to every partition role keeps that material, unless a partition
    // role paints the same palette colour. An antialias grey between sclera
    // and ink is not surrounding material and stays with the partition.
-   let context=null;if(parts.length)try{context=contextAt(q,roles);}catch{context=null;}
+   let context=null;if(parts.length||construction)try{context=contextAt(q,roles);}catch{context=null;}
    const key=allowed.join('/')+':'+(context?.color??'')+':'+source.data.readUInt32BE(q*4);let role=cache.get(key);
    if(role===undefined){const lab=toLab([...source.data.subarray(q*4,q*4+3)]);let best=Infinity;for(const name of allowed){const r=roles.findIndex(v=>v.name===name),d=Math.min(...roles[r].labs.map(s=>distance(s,lab)));if(d<best){best=d;role=r;}}
     if(context&&surround.has(context.color)&&!allowed.some(name=>roles.find(v=>v.name===name).color===context.color)){const k=palette.findIndex(p=>p.hex===context.color);if(distance(lab,paletteLabs[k])<best)role=null;}
@@ -292,6 +297,22 @@ function placeSourceEyePartitions(PNG,source,baseline,palette,policy,grid,materi
   const lightIndex=roles.findIndex(r=>r.name==='light'),whiteIndex=roles.findIndex(r=>r.family==='white'&&r.geometry!=='stroke');let scleraJoined=0;
   if(lightIndex>=0&&whiteIndex>=0)for(const [q,r] of labels){if(r!==lightIndex)continue;const lab=toLab([...source.data.subarray(q*4,q*4+3)]);
    if(Math.min(...roles[whiteIndex].labs.map(v=>distance(v,lab)))<Math.min(...roles[lightIndex].labs.map(v=>distance(v,lab)))){labels.set(q,whiteIndex);sourceCounts[lightIndex]--;sourceCounts[whiteIndex]++;sourceRoleMap.data.writeUInt32BE(rgba(roles[whiteIndex].color),q*4);scleraJoined++;}}
+  if(policy.placement==='source-construction'){
+   const {constructEye}=require('./eye-construction.cjs');
+   const cellArea=(grid.x[0][1]-grid.x[0][0])*(grid.y[0][1]-grid.y[0][0]);
+   const built=constructEye({eye,roles,labels,source,grid,width:image.width,height:image.height,contextColorAt:q=>{try{return contextAt(q,roles).color;}catch{return null;}}});
+   const cells=[],nativeRoles=new Map();
+   for(const [p,r] of built.cells){if(claimed.has(p))throw Error('Overlapping eye cell ownership');claimed.add(p);cells.push(p);image.data.writeUInt32BE(rgba(roles[r].color),p*4);nativeRoles.set(p,r);}
+   // Cells the eye touches but does not construct take the surrounding
+   // material of their pixels outside the eye, not eye pigment.
+   for(let y=0;y<image.height;y++)for(let x=0;x<image.width;x++){const p=y*image.width+x;if(built.cells.has(p))continue;const [a,b]=grid.x[x],[c,d]=grid.y[y];if(a>=rx+rw||b<=rx||c>=ry+rh||d<=ry)continue;
+    const votes=new Map();let inside=0;for(let sy=Math.max(0,Math.floor(c));sy<Math.min(source.height,Math.ceil(d));sy++)for(let sx=Math.max(0,Math.floor(a));sx<Math.min(source.width,Math.ceil(b));sx++){const q=sy*source.width+sx;if(eyeOwnsSource(eye,sx+.5,sy+.5)){inside++;continue;}let col;try{col=contextAt(q,roles).color;}catch{continue;}votes.set(col,(votes.get(col)||0)+1);}
+    if(!inside)continue;if(claimed.has(p))throw Error('Overlapping eye cell ownership');claimed.add(p);cells.push(p);
+    const best=[...votes].sort((u,v)=>v[1]-u[1])[0];if(best)image.data.writeUInt32BE(rgba(best[0]),p*4);}
+   for(let r=0;r<roles.length;r++)if(roles[r].required!==false&&roles[r].geometry!=='feature'&&sourceCounts[r]>=cellArea/2&&![...nativeRoles.values()].includes(r))throw Error('Eye construction lost an observed required plane: '+eye.name+'/'+roles[r].name+' ('+sourceCounts[r]+' source px)');
+   reports.push({name:eye.name,placement:'source-construction',cells,roles:roles.map((r,i)=>({name:r.name,color:r.color,family:r.family,sourcePixels:sourceCounts[i],nativeCells:[...nativeRoles.values()].filter(v=>v===i).length})),measured:built.measured,decisions:built.decisions,geometry:{executed:true,strokes:[]},reflection:[],fillShapes:[],...(leftToSurround?{partitionPixelsLeftToSurroundingMaterial:leftToSurround}:{}),...(scleraJoined?{lightPixelsMovedToWhite:scleraJoined}:{})});
+   continue;
+  }
   const attachmentReports=[];
   for(let r=0;r<roles.length;r++)if(roles[r].attachedFill){
    const mask=new Set([...labels].filter(([,v])=>v===r).map(([q])=>q));
@@ -451,7 +472,7 @@ function auditEyePolicy(PNG,source,saved,palette,policy,grid,material=null){
  const replay=applyEyePolicy(PNG,source,saved,palette,policy,grid,material);
  const missingRoles=[];
  if(policy.visibility==='visible')for(let i=0;i<policy.eyes.length;i++)for(const r of policy.eyes[i].roles){
-  const present=policy.placement==='source-partitions'?replay.report.eyes[i].roles.find(v=>v.name===r.name).nativeCells>0:replay.report.eyes[i].cells.some(p=>saved.data.readUInt32BE(p*4)===rgba(r.color));
+  const present=['source-partitions','source-construction'].includes(policy.placement)?replay.report.eyes[i].roles.find(v=>v.name===r.name).nativeCells>0:replay.report.eyes[i].cells.some(p=>saved.data.readUInt32BE(p*4)===rgba(r.color));
   if((r.required??r.name!=='light')&&!present)missingRoles.push(policy.eyes[i].name+'/'+r.name);
  }
  const geometryExecuted=!policy.geometryPolicy||policy.visibility==='not-visible'||replay.report.eyes.every(e=>e.geometry?.executed===true);

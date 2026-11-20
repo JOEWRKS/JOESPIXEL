@@ -9,7 +9,7 @@ const shiftPolicy=(p,dx,dy)=>{const q=JSON.parse(JSON.stringify(p));for(const e 
 const out=[];
 for(const [dx,dy] of [[0,0],[2,0],[4,0],[6,0],[0,2],[0,4],[0,6],[3,3],[5,5]]){
  const face=new PNG({width:192,height:128});for(let y=0;y<128;y++)for(let x=0;x<192;x++){const i=((128-dy+y)*1024+(384-dx+x))*4;face.data.set(src.data.subarray(i,i+4),(y*192+x)*4);}
- let txt;try{const r=buildNative(PNG,face,pal,24,16,c.background,'source-region-area',null,null,null,shiftPolicy(c.rimInRing,dx,dy));
+ let txt;try{const r=buildNative(PNG,face,pal,24,16,c.background,'source-region-area',null,null,null,shiftPolicy({...c.rimInRing,placement:process.env.PLACEMENT||c.rimInRing.placement},dx,dy));
   const rows=[];for(let y=2;y<=10;y++){let s='';for(let x=3;x<=21;x++){const i=(y*24+x)*4;s+=L[[0,1,2].map(k=>r.image.data[i+k].toString(16).padStart(2,'0')).join('').toUpperCase()]||'.';}rows.push(s);}
   txt=rows;}catch(e){txt=['BLOCKED: '+e.message.slice(0,110)];}
  out.push(['shift '+dx+','+dy,txt]);}
