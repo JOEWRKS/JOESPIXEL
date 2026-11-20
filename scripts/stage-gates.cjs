@@ -47,8 +47,13 @@ function executionOptions(route,config){
 }
 function validateExecution(plan){
  if(plan?.version!==1||!SAMPLERS[plan.route]?.includes(plan.sampling)||!Array.isArray(plan.operations)||new Set(plan.operations).size!==plan.operations.length)throw Error('Explicit execution plan with route, sampling and operation list required');
- if(Object.keys(plan).some(k=>!['version','route','sampling','operations','fixedGridUserRequest'].includes(k)))throw Error('Unknown execution-plan field; no implicit override or fallback switches');
- if(plan.route==='fixed-asset-grid'&&(typeof plan.fixedGridUserRequest!=='string'||!plan.fixedGridUserRequest.trim()))throw Error('Fixed asset grid requires the explicit user asset-size request; a guessed native size is not authorization');
+ if(Object.keys(plan).some(k=>!['version','route','sampling','operations','fixedGridUserRequest','sizeRequest'].includes(k)))throw Error('Unknown execution-plan field; no implicit override or fallback switches');
+ // A size the user never gave must be recorded as unspecified, not as an
+ // invented request sentence. Unspecified size is only valid with a compare
+ // selection (checked at the capacity stage); it is never a fixed-size licence.
+ const userSize=typeof plan.fixedGridUserRequest==='string'&&plan.fixedGridUserRequest.trim();
+ if(plan.sizeRequest!==undefined&&(plan.sizeRequest!=='unspecified'||userSize))throw Error('sizeRequest may only be "unspecified" and cannot accompany a user size request');
+ if(plan.route==='fixed-asset-grid'&&!userSize&&plan.sizeRequest!=='unspecified')throw Error('Fixed asset grid requires the explicit user asset-size request, or sizeRequest: "unspecified" with a compared capacity selection; a guessed native size is not authorization');
  const allowed=['features','observedDetails','referenceCorrection','boundaryCorrection','exteriorOutline','protection','regions','structure','eyePolicy','formPolicy','outlinePolicy','sourceColorPolicy','materialPlan'];
  if(plan.operations.some(k=>!allowed.includes(k)))throw Error('Unknown planned operation');
 }
@@ -219,6 +224,7 @@ function assertCapacitySelection(stage,first,asset,fail){
  const fixed=s.mode==='user-fixed';
  need(s.mode===undefined||s.mode==='compare'||fixed,'unknown capacity selection mode');
  if(fixed)need(text(first.execution?.fixedGridUserRequest),'fixed capacity needs explicit user grid request');
+ if(first.execution?.sizeRequest==='unspecified')need(!fixed,'unspecified size must compare candidate grids, not claim a user-fixed grid');
  need(Array.isArray(s.candidates)&&(fixed?s.candidates.length===1:s.candidates.length>=2),fixed?'user-fixed capacity must test exactly the requested grid':'compare at least two actual candidate grids');
  need(new Set(s.candidates.map(c=>c.id)).size===s.candidates.length&&s.candidates.every(c=>text(c.id)),'unique candidate ids required');
  const {PNG}=require(require.resolve('pngjs',{paths:[__dirname,process.cwd()]}));

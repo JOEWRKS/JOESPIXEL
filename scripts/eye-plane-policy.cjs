@@ -358,6 +358,12 @@ function placeSourceEyePartitions(PNG,source,baseline,palette,policy,grid,materi
    if(plan.interiorRoles)for(const[p,r]of nativeRoles)if(plan.interiorRoles.has(r)&&!plan.nativeInterior.has(p))throw Error('Closed eye interior role escaped its allocated rim: '+eye.name+'/'+roles[r].name+' at '+p);
   }
   if(policy.geometryPolicy)for(let r=0;r<roles.length;r++)if(roles[r].required!==false&&sourceCounts[r]&&![...nativeRoles.values()].includes(r)){const error=new Error('Eye joint placement erased required role: '+eye.name+'/'+roles[r].name);error.fillShapes=fillShapes;throw error;}
+  // An optional role is optional when it is small, not when the placement
+  // consumes a large observed plane (e.g. a dark iris band eaten by a lid
+  // stroke). Two full cells of source pigment is a visible shape at this grid.
+  if(policy.geometryPolicy){const cellArea=(grid.x[0][1]-grid.x[0][0])*(grid.y[0][1]-grid.y[0][0]);
+   for(let r=0;r<roles.length;r++)if(roles[r].required===false&&roles[r].geometry!=='feature'&&sourceCounts[r]>=2*cellArea&&![...nativeRoles.values()].includes(r)){
+    const error=new Error('Eye joint placement erased an observed plane of '+(sourceCounts[r]/cellArea).toFixed(1)+' cells: '+eye.name+'/'+roles[r].name+'. Check whether a stroke role (lid) owns an ink rim inside this plane; give the rim to the plane partition.');error.fillShapes=fillShapes;throw error;}}
   reports.push({name:eye.name,cells,roles:roles.map((r,i)=>({name:r.name,color:r.color,family:r.family,sourcePixels:sourceCounts[i],nativeCells:[...nativeRoles.values()].filter(v=>v===i).length})),reflection,geometry,fillShapes,...(attachmentReports.length?{attachments:attachmentReports}:{})});
  }
  let changed=0;for(let p=0;p<baseline.width*baseline.height;p++)if(image.data.readUInt32BE(p*4)!==baseline.data.readUInt32BE(p*4))changed++;

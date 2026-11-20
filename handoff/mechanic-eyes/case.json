@@ -1,0 +1,1206 @@
+{
+ "observation": "Face crop of an original review character (x384-576, y128-256 of a 1024x1536 canvas, 8px cells). Coordinates are observations in this crop.",
+ "palette": {
+  "colors": [
+   "#FDF4E2",
+   "#150D0A",
+   "#FECAA5",
+   "#A37158",
+   "#FAEDE6",
+   "#499246",
+   "#224D29",
+   "#F3F5F4",
+   "#DDD2CD",
+   "#AD4E2B",
+   "#692E19",
+   "#9D4626",
+   "#F5A92E",
+   "#A26A1E",
+   "#325252",
+   "#162A29",
+   "#416162",
+   "#9E5A36",
+   "#814E2E",
+   "#713B25",
+   "#5E3524",
+   "#51372C",
+   "#5E4135",
+   "#714E3E",
+   "#CEC0BE",
+   "#B9ACAA",
+   "#857A76",
+   "#A79A95",
+   "#726965"
+  ]
+ },
+ "background": "#FDF4E2",
+ "native": [
+  24,
+  16
+ ],
+ "rimInBase": {
+  "version": 1,
+  "visibility": "visible",
+  "placement": "source-partitions",
+  "geometryPolicy": "source-stroke-fill",
+  "observation": "Two visible eyes in three-quarter view facing viewer left. Viewer-right eye is larger (x483-541, y143-196): thick dark upper lid with an inner lash flick, warm white on the inner side, green iris with a darker top, dark pupil and one white highlight at its upper left. Viewer-left eye is narrower (x409-454, y170-215): thick upper lid that meets the hair contour at its outer top, white on the outer side, green iris, pupil and highlight. No lower lid line; the eyes are separate from the brows.",
+  "eyes": [
+   {
+    "name": "right-eye",
+    "rect": [
+     92,
+     8,
+     72,
+     68
+    ],
+    "reflection": "if-room",
+    "sourcePolygon": [
+     [
+      105,
+      18
+     ],
+     [
+      111,
+      15
+     ],
+     [
+      141,
+      14
+     ],
+     [
+      156,
+      17
+     ],
+     [
+      159,
+      32
+     ],
+     [
+      157,
+      52
+     ],
+     [
+      148,
+      66
+     ],
+     [
+      131,
+      69
+     ],
+     [
+      111,
+      67
+     ],
+     [
+      106,
+      52
+     ],
+     [
+      105,
+      32
+     ]
+    ],
+    "baseRoles": [
+     "lid"
+    ],
+    "partitions": [
+     {
+      "name": "white",
+      "roles": [
+       "white"
+      ],
+      "observation": "Inner white.",
+      "sourcePolygon": [
+       [
+        106,
+        31
+       ],
+       [
+        121,
+        29
+       ],
+       [
+        121,
+        67
+       ],
+       [
+        111,
+        67
+       ],
+       [
+        106,
+        52
+       ]
+      ]
+     },
+     {
+      "name": "iris",
+      "roles": [
+       "iris",
+       "iris-dark",
+       "pupil",
+       "light"
+      ],
+      "observation": "Whole iris as one partition; its ink rim is outside it.",
+      "sourcePolygon": [
+       [
+        121,
+        29
+       ],
+       [
+        155,
+        27
+       ],
+       [
+        156,
+        47
+       ],
+       [
+        148,
+        65
+       ],
+       [
+        121,
+        67
+       ]
+      ]
+     }
+    ],
+    "roles": [
+     {
+      "name": "lid",
+      "family": "lid",
+      "geometry": "stroke",
+      "width": 1,
+      "closed": false,
+      "color": "#150D0A",
+      "colors": [
+       "#150D0A"
+      ],
+      "samples": [
+       [
+        23,
+        15,
+        13
+       ]
+      ],
+      "required": true,
+      "observation": "Thick dark upper lid and inner lash flick."
+     },
+     {
+      "name": "white",
+      "family": "white",
+      "geometry": "fill",
+      "color": "#FAEDE6",
+      "colors": [
+       "#FAEDE6"
+      ],
+      "samples": [
+       [
+        250,
+        237,
+        230
+       ],
+       [
+        249,
+        235,
+        225
+       ]
+      ],
+      "required": true
+     },
+     {
+      "name": "iris",
+      "family": "iris",
+      "geometry": "fill",
+      "color": "#499246",
+      "colors": [
+       "#499246"
+      ],
+      "samples": [
+       [
+        69,
+        140,
+        70
+       ]
+      ],
+      "required": true
+     },
+     {
+      "name": "iris-dark",
+      "family": "iris",
+      "geometry": "fill",
+      "color": "#224D29",
+      "colors": [
+       "#224D29"
+      ],
+      "samples": [
+       [
+        18,
+        35,
+        22
+       ],
+       [
+        24,
+        46,
+        29
+       ]
+      ],
+      "required": false
+     },
+     {
+      "name": "pupil",
+      "family": "iris",
+      "geometry": "fill",
+      "color": "#150D0A",
+      "colors": [
+       "#150D0A"
+      ],
+      "samples": [
+       [
+        24,
+        17,
+        13
+       ]
+      ],
+      "required": true,
+      "protect": true
+     },
+     {
+      "name": "light",
+      "family": "iris",
+      "geometry": "feature",
+      "color": "#F3F5F4",
+      "colors": [
+       "#F3F5F4"
+      ],
+      "samples": [
+       [
+        243,
+        245,
+        244
+       ]
+      ],
+      "required": false
+     }
+    ],
+    "observation": "Viewer-right eye: polygon starts at x489 so the separate inner lash flick (x484-491,y149-157) and the inner-corner line (x487-488,y162-170) stay outline strokes. Iris partition includes its left rim (x505-507)."
+   },
+   {
+    "name": "left-eye",
+    "rect": [
+     18,
+     36,
+     58,
+     58
+    ],
+    "reflection": "if-room",
+    "sourcePolygon": [
+     [
+      24,
+      44
+     ],
+     [
+      36,
+      42
+     ],
+     [
+      56,
+      42
+     ],
+     [
+      68,
+      50
+     ],
+     [
+      70,
+      67
+     ],
+     [
+      69,
+      81
+     ],
+     [
+      47,
+      81
+     ],
+     [
+      46,
+      75
+     ],
+     [
+      37,
+      69
+     ],
+     [
+      30,
+      60
+     ]
+    ],
+    "baseRoles": [
+     "lid"
+    ],
+    "partitions": [
+     {
+      "name": "white",
+      "roles": [
+       "white"
+      ],
+      "observation": "Outer white.",
+      "sourcePolygon": [
+       [
+        32,
+        55
+       ],
+       [
+        48,
+        54
+       ],
+       [
+        49,
+        81
+       ],
+       [
+        47,
+        81
+       ],
+       [
+        46,
+        75
+       ],
+       [
+        37,
+        69
+       ],
+       [
+        33,
+        64
+       ]
+      ]
+     },
+     {
+      "name": "iris",
+      "roles": [
+       "iris",
+       "iris-dark",
+       "pupil",
+       "light"
+      ],
+      "observation": "Whole iris as one partition; its ink rim is outside it.",
+      "sourcePolygon": [
+       [
+        49,
+        54
+       ],
+       [
+        68,
+        55
+       ],
+       [
+        69,
+        81
+       ],
+       [
+        49,
+        81
+       ]
+      ]
+     }
+    ],
+    "roles": [
+     {
+      "name": "lid",
+      "family": "lid",
+      "geometry": "stroke",
+      "width": 1,
+      "closed": false,
+      "color": "#150D0A",
+      "colors": [
+       "#150D0A"
+      ],
+      "samples": [
+       [
+        27,
+        16,
+        12
+       ]
+      ],
+      "required": true,
+      "observation": "Thick dark upper lid with an outer lash flick; touches the hair contour at its outer top."
+     },
+     {
+      "name": "white",
+      "family": "white",
+      "geometry": "fill",
+      "color": "#FAEDE6",
+      "colors": [
+       "#FAEDE6"
+      ],
+      "samples": [
+       [
+        250,
+        237,
+        230
+       ]
+      ],
+      "required": true
+     },
+     {
+      "name": "iris",
+      "family": "iris",
+      "geometry": "fill",
+      "color": "#499246",
+      "colors": [
+       "#499246"
+      ],
+      "samples": [
+       [
+        85,
+        147,
+        78
+       ],
+       [
+        84,
+        156,
+        74
+       ]
+      ],
+      "required": true
+     },
+     {
+      "name": "iris-dark",
+      "family": "iris",
+      "geometry": "fill",
+      "color": "#224D29",
+      "colors": [
+       "#224D29"
+      ],
+      "samples": [
+       [
+        21,
+        48,
+        30
+       ],
+       [
+        27,
+        58,
+        34
+       ]
+      ],
+      "required": false
+     },
+     {
+      "name": "pupil",
+      "family": "iris",
+      "geometry": "fill",
+      "color": "#150D0A",
+      "colors": [
+       "#150D0A"
+      ],
+      "samples": [
+       [
+        15,
+        11,
+        8
+       ],
+       [
+        22,
+        18,
+        12
+       ]
+      ],
+      "required": true,
+      "protect": true
+     },
+     {
+      "name": "light",
+      "family": "iris",
+      "geometry": "feature",
+      "color": "#F3F5F4",
+      "colors": [
+       "#F3F5F4"
+      ],
+      "samples": [
+       [
+        237,
+        238,
+        236
+       ]
+      ],
+      "required": false
+     }
+    ],
+    "observation": "Viewer-left eye. Ownership polygon stops at y209 and excludes the lower-outer white contour; the lowest 2-4 px of the white/iris and their antialiased rim stay with the outline and skin."
+   }
+  ]
+ },
+ "rimInRing": {
+  "version": 1,
+  "visibility": "visible",
+  "placement": "source-partitions",
+  "geometryPolicy": "source-stroke-fill",
+  "observation": "Two visible eyes in three-quarter view facing viewer left. Viewer-right eye is larger (x483-541, y143-196): thick dark upper lid with an inner lash flick, warm white on the inner side, green iris with a darker top, dark pupil and one white highlight at its upper left. Viewer-left eye is narrower (x409-454, y170-215): thick upper lid that meets the hair contour at its outer top, white on the outer side, green iris, pupil and highlight. No lower lid line; the eyes are separate from the brows.",
+  "eyes": [
+   {
+    "name": "right-eye",
+    "rect": [
+     92,
+     8,
+     72,
+     68
+    ],
+    "reflection": "if-room",
+    "sourcePolygon": [
+     [
+      105,
+      18
+     ],
+     [
+      111,
+      15
+     ],
+     [
+      141,
+      14
+     ],
+     [
+      156,
+      17
+     ],
+     [
+      159,
+      32
+     ],
+     [
+      157,
+      52
+     ],
+     [
+      148,
+      66
+     ],
+     [
+      131,
+      69
+     ],
+     [
+      111,
+      67
+     ],
+     [
+      106,
+      52
+     ],
+     [
+      105,
+      32
+     ]
+    ],
+    "baseRoles": [
+     "lid"
+    ],
+    "partitions": [
+     {
+      "name": "white",
+      "roles": [
+       "white"
+      ],
+      "observation": "Inner warm white x490-505.",
+      "sourcePolygon": [
+       [
+        106,
+        31
+       ],
+       [
+        121,
+        29
+       ],
+       [
+        121,
+        67
+       ],
+       [
+        111,
+        67
+       ],
+       [
+        106,
+        52
+       ]
+      ]
+     },
+     {
+      "name": "iris-left",
+      "roles": [
+       "iris",
+       "iris-dark",
+       "light"
+      ],
+      "observation": "Left iris ring incl. its ink rim and the highlight.",
+      "sourcePolygon": [
+       [
+        121,
+        29
+       ],
+       [
+        131,
+        29
+       ],
+       [
+        131,
+        69
+       ],
+       [
+        121,
+        67
+       ]
+      ]
+     },
+     {
+      "name": "pupil",
+      "roles": [
+       "pupil",
+       "iris-dark",
+       "light"
+      ],
+      "observation": "Central pupil x515-528 y157-181 with the dark iris top.",
+      "sourcePolygon": [
+       [
+        131,
+        29
+       ],
+       [
+        144,
+        29
+       ],
+       [
+        144,
+        53
+       ],
+       [
+        131,
+        53
+       ]
+      ]
+     },
+     {
+      "name": "iris-right",
+      "roles": [
+       "iris",
+       "iris-dark",
+       "white"
+      ],
+      "observation": "Right iris ring incl. its ink rim and the thin outer white.",
+      "sourcePolygon": [
+       [
+        144,
+        27
+       ],
+       [
+        155,
+        27
+       ],
+       [
+        159,
+        32
+       ],
+       [
+        157,
+        52
+       ],
+       [
+        152,
+        62
+       ],
+       [
+        144,
+        62
+       ]
+      ]
+     },
+     {
+      "name": "iris-bottom",
+      "roles": [
+       "iris",
+       "iris-dark"
+      ],
+      "observation": "Lower iris and its ink rim.",
+      "sourcePolygon": [
+       [
+        131,
+        53
+       ],
+       [
+        144,
+        53
+       ],
+       [
+        144,
+        62
+       ],
+       [
+        152,
+        62
+       ],
+       [
+        148,
+        66
+       ],
+       [
+        131,
+        69
+       ]
+      ]
+     }
+    ],
+    "roles": [
+     {
+      "name": "lid",
+      "family": "lid",
+      "geometry": "stroke",
+      "width": 1,
+      "closed": false,
+      "color": "#150D0A",
+      "colors": [
+       "#150D0A"
+      ],
+      "samples": [
+       [
+        23,
+        15,
+        13
+       ]
+      ],
+      "required": true,
+      "observation": "Thick dark upper lid and inner lash flick."
+     },
+     {
+      "name": "white",
+      "family": "white",
+      "geometry": "fill",
+      "color": "#FAEDE6",
+      "colors": [
+       "#FAEDE6"
+      ],
+      "samples": [
+       [
+        250,
+        237,
+        230
+       ],
+       [
+        249,
+        235,
+        225
+       ]
+      ],
+      "required": true
+     },
+     {
+      "name": "iris",
+      "family": "iris",
+      "geometry": "fill",
+      "color": "#499246",
+      "colors": [
+       "#499246"
+      ],
+      "samples": [
+       [
+        69,
+        140,
+        70
+       ]
+      ],
+      "required": true
+     },
+     {
+      "name": "iris-dark",
+      "family": "iris",
+      "geometry": "fill",
+      "color": "#224D29",
+      "colors": [
+       "#224D29"
+      ],
+      "samples": [
+       [
+        18,
+        35,
+        22
+       ],
+       [
+        24,
+        46,
+        29
+       ]
+      ],
+      "required": false
+     },
+     {
+      "name": "pupil",
+      "family": "iris",
+      "geometry": "fill",
+      "color": "#150D0A",
+      "colors": [
+       "#150D0A"
+      ],
+      "samples": [
+       [
+        24,
+        17,
+        13
+       ]
+      ],
+      "required": true,
+      "protect": true
+     },
+     {
+      "name": "light",
+      "family": "iris",
+      "geometry": "feature",
+      "color": "#F3F5F4",
+      "colors": [
+       "#F3F5F4"
+      ],
+      "samples": [
+       [
+        243,
+        245,
+        244
+       ]
+      ],
+      "required": false
+     }
+    ],
+    "observation": "Viewer-right eye: polygon starts at x489 so the separate inner lash flick (x484-491,y149-157) and the inner-corner line (x487-488,y162-170) stay outline strokes. Iris partition includes its left rim (x505-507)."
+   },
+   {
+    "name": "left-eye",
+    "rect": [
+     18,
+     36,
+     58,
+     58
+    ],
+    "reflection": "if-room",
+    "sourcePolygon": [
+     [
+      24,
+      44
+     ],
+     [
+      36,
+      42
+     ],
+     [
+      56,
+      42
+     ],
+     [
+      68,
+      50
+     ],
+     [
+      70,
+      67
+     ],
+     [
+      69,
+      81
+     ],
+     [
+      47,
+      81
+     ],
+     [
+      46,
+      75
+     ],
+     [
+      37,
+      69
+     ],
+     [
+      30,
+      60
+     ]
+    ],
+    "baseRoles": [
+     "lid"
+    ],
+    "partitions": [
+     {
+      "name": "white",
+      "roles": [
+       "white"
+      ],
+      "observation": "Outer white x417-433.",
+      "sourcePolygon": [
+       [
+        32,
+        55
+       ],
+       [
+        48,
+        54
+       ],
+       [
+        49,
+        81
+       ],
+       [
+        47,
+        81
+       ],
+       [
+        46,
+        75
+       ],
+       [
+        37,
+        69
+       ],
+       [
+        33,
+        64
+       ]
+      ]
+     },
+     {
+      "name": "iris-left",
+      "roles": [
+       "iris",
+       "iris-dark",
+       "light"
+      ],
+      "observation": "Left iris ring incl. rim and the highlight.",
+      "sourcePolygon": [
+       [
+        49,
+        54
+       ],
+       [
+        56,
+        54
+       ],
+       [
+        56,
+        81
+       ],
+       [
+        49,
+        81
+       ]
+      ]
+     },
+     {
+      "name": "pupil",
+      "roles": [
+       "pupil",
+       "iris-dark"
+      ],
+      "observation": "Central pupil x440-450 y183-202.",
+      "sourcePolygon": [
+       [
+        56,
+        55
+       ],
+       [
+        66,
+        55
+       ],
+       [
+        66,
+        74
+       ],
+       [
+        56,
+        74
+       ]
+      ]
+     },
+     {
+      "name": "iris-right",
+      "roles": [
+       "iris",
+       "iris-dark",
+       "white"
+      ],
+      "observation": "Right iris ring incl. rim and the thin outer white.",
+      "sourcePolygon": [
+       [
+        66,
+        55
+       ],
+       [
+        68,
+        55
+       ],
+       [
+        70,
+        67
+       ],
+       [
+        69,
+        81
+       ],
+       [
+        66,
+        81
+       ]
+      ]
+     },
+     {
+      "name": "iris-bottom",
+      "roles": [
+       "iris",
+       "iris-dark"
+      ],
+      "observation": "Lower iris and rim.",
+      "sourcePolygon": [
+       [
+        56,
+        74
+       ],
+       [
+        66,
+        74
+       ],
+       [
+        66,
+        81
+       ],
+       [
+        56,
+        81
+       ]
+      ]
+     }
+    ],
+    "roles": [
+     {
+      "name": "lid",
+      "family": "lid",
+      "geometry": "stroke",
+      "width": 1,
+      "closed": false,
+      "color": "#150D0A",
+      "colors": [
+       "#150D0A"
+      ],
+      "samples": [
+       [
+        27,
+        16,
+        12
+       ]
+      ],
+      "required": true,
+      "observation": "Thick dark upper lid with an outer lash flick; touches the hair contour at its outer top."
+     },
+     {
+      "name": "white",
+      "family": "white",
+      "geometry": "fill",
+      "color": "#FAEDE6",
+      "colors": [
+       "#FAEDE6"
+      ],
+      "samples": [
+       [
+        250,
+        237,
+        230
+       ]
+      ],
+      "required": true
+     },
+     {
+      "name": "iris",
+      "family": "iris",
+      "geometry": "fill",
+      "color": "#499246",
+      "colors": [
+       "#499246"
+      ],
+      "samples": [
+       [
+        85,
+        147,
+        78
+       ],
+       [
+        84,
+        156,
+        74
+       ]
+      ],
+      "required": true
+     },
+     {
+      "name": "iris-dark",
+      "family": "iris",
+      "geometry": "fill",
+      "color": "#224D29",
+      "colors": [
+       "#224D29"
+      ],
+      "samples": [
+       [
+        21,
+        48,
+        30
+       ],
+       [
+        27,
+        58,
+        34
+       ]
+      ],
+      "required": false
+     },
+     {
+      "name": "pupil",
+      "family": "iris",
+      "geometry": "fill",
+      "color": "#150D0A",
+      "colors": [
+       "#150D0A"
+      ],
+      "samples": [
+       [
+        15,
+        11,
+        8
+       ],
+       [
+        22,
+        18,
+        12
+       ]
+      ],
+      "required": true,
+      "protect": true
+     },
+     {
+      "name": "light",
+      "family": "iris",
+      "geometry": "feature",
+      "color": "#F3F5F4",
+      "colors": [
+       "#F3F5F4"
+      ],
+      "samples": [
+       [
+        237,
+        238,
+        236
+       ]
+      ],
+      "required": false
+     }
+    ],
+    "observation": "Viewer-left eye. Ownership polygon stops at y209 and excludes the lower-outer white contour; the lowest 2-4 px of the white/iris and their antialiased rim stay with the outline and skin."
+   }
+  ]
+ }
+}

@@ -86,6 +86,15 @@ node scripts/run-pixel-workflow.cjs verify /absolute/path/new-run
 - `applyEyePolicy`가 반환한 `sourceRoleMap`을 실제 원안과 먼저 대조한다. 위쪽 속눈썹까지 눈 소유 영역에 들어가는지, 홍채 경계·동공·반사가 올바른 역할인지 확인한다. 원본 관찰 경로이며 목적지 도트 지정이나 자동 해부학 인식이 아니다. 단순한 점눈도 관찰된 하나의 형태로 명시하며 홍채를 새로 만들지 않는다.
 - 중앙 동공과 홍채 가장자리가 같은 어두운 색이면 RGB 표본만으로 구별하지 않는다. 관찰된 중앙 영역과 주변 홍채를 겹치지 않는 소스 `partitions`로 나누고, 동공 역할은 실제 중앙 영역에서만 허용한다. 색의 존재와 별개로 원본의 동공 위치·홍채 비율을 비교한다.
 
+**잉크로 그린 홍채 테두리.** 애니메이션식 눈은 홍채 둘레를 외곽선과 같은 어두운 색으로 그리는 경우가 많다. 이 테두리가 어느 partition에도 속하지 않으면 `baseRoles`의 눈꺼풀 획으로 분류된다. 그러면 작은 눈에서 눈꺼풀 골격이 흰자와 홍채 사이를 세로로 가르거나, 원본에 없는 아래 테두리를 만들어 고리가 된다. 홍채 전체를 하나의 partition으로 두고 동공 역할을 함께 허용하면, 같은 RGB의 테두리가 보호 동공으로 들어가 동공이 커진다. 따라서 테두리를 포함한 홍채를 **동공을 둘러싼 고리 조각들**(왼쪽·오른쪽·아래 등 서로 겹치지 않는 다각형, 역할 `iris`, `iris-dark`, 필요하면 흰자·`light`)과 **중앙 동공 조각**(역할 `pupil`, 필요하면 `iris-dark`)으로 나눈다. 고리 조각에는 `pupil`을 허용하지 않으므로 테두리 화소는 가장 가까운 홍채 음영 역할로 분류된다. 흰자와 홍채 조각 사이에 틈을 남기지 않는다. 1~2px 틈의 테두리도 별도 눈꺼풀 성분이 된다.
+
+실행 보호:
+
+- 눈꺼풀 같은 획의 원본 성분 수를 셀 때 **한 칸 면적의 1/4 미만인 조각**(안티앨리어싱 점)은 제외하고 `ignoredSourceFragments`로 보고한다. 모든 조각이 작으면(작은 표식) 제외하지 않는다.
+- `closed: false` 획의 원본 화소가 이미 내부를 둘러싸면 `Open stroke encloses a source interior`로 중단한다. 원인은 대개 위의 테두리다.
+- 선택 역할(`required: false`)이어도 원본 면적이 **두 칸 이상**인데 배치에서 0칸이 되면 `erased an observed plane`으로 중단한다. 반사(`feature`)는 제외한다.
+- 위상·고리 실패 메시지에는 원본 성분의 픽셀 수·범위(`sourceComponents`)와 배치 칸(`nativeCells`)이 들어간다. 다각형을 깎아 통과시키기 전에 그 성분이 실제로 무엇인지 원본에서 확인한다.
+
 원본에서 확인한 축 방향의 조밀한 타원 동공에는 보호된 `fill` 역할에 `shape: "source-oval"`을 지정할 수 있다. 원본 역할 마스크의 폭·높이·중심을 공동 배치하며 흰자·반사·다른 보호 역할을 침범하거나 중심을 축별 반 칸 이상 이동해야 하면 차단한다. 모든 눈을 타원으로 강제하는 옵션이 아니며 원안 관찰 없이 사용하지 않는다.
 
 ### 외곽선
@@ -139,6 +148,19 @@ node scripts/run-pixel-workflow.cjs verify /absolute/path/new-run
 - `protectedFeatures`: `{role, rect, sourcePolygon?, observation}`. 눈 다각형과 동일한 보호 형태를 사용한다.
 - `inventory`: `{id, decision: assigned|preserved|absent, regionIds, observation}`. 전체 부위를 확인하며 미확인을 preserved로 바꾸지 않는다.
 
+`regions`가 비어 있으면 재질 제약이 없어서, 색이 비슷한 다른 재질의 팔레트색이 고립 칸으로 섞인다(예: 가죽 주머니에 머리색, 렌치에 흰자색). 이를 막으려면 재질표를 관찰하고 `scripts/derive-material-regions.cjs`로 영역을 만든다.
+
+- 재질표: `[{material, colors, baseColor, observation}]`. 어느 팔레트색이 어느 재질을 이루는지만 적는다.
+- 공간 결정: 이어진 평면 영역마다 한 번 다수결로 재질을 정하고, 전이 화소(안티앨리어싱)는 가장 가까운 평면 영역을 따른다.
+- 여러 재질이 쓰는 색: 씨앗에서 제외하고 주변을 따른다. 예: 흰 옷과 눈 흰자가 같은 색인 경우.
+- 출력: `{regions, inventory}`를 계획에 넣고, 함께 나오는 지도 PNG를 원안과 대조한다.
+
+이 도구는 의미를 인식하지 않는다. 재질표가 틀리면 영역도 틀린다.
+
+```text
+node scripts/derive-material-regions.cjs --source S.png --palette P.json --materials M.json --out regions.json --map map.png
+```
+
 관찰한 재질의 누락을 막으려면 `roleWitnesses: [{material, points:[[sourceX,sourceY],...], connected:true|false, observation}]`를 기록한다. 얼굴은 이마 위쪽과 아래쪽·볼·턱처럼 같은 피부 면에 속하는 실제 소스 지점을 포함한다. 지정 지점의 재질 배정이 빠졌거나 연결 조건이 깨지면 격자 배치 전에 중단한다. 이 검사는 지정한 소스 관찰 근거를 확인하며 자동 해부학 인식이나 전체 시각 검수를 대신하지 않는다.
 
 `compile(PNG, source, palette, width, height, plan, policies)`가 만든 `map`을 PNG로 저장하고 원본과 직접 비교한다. 분류가 잘못되면 계획을 고친 뒤 재생성한다. 최종 픽셀을 칠하여 계획 오류를 숨기지 않는다.
@@ -149,10 +171,10 @@ node scripts/run-pixel-workflow.cjs verify /absolute/path/new-run
 
 각 레코드는 `stage`, `name`, `status`, `reviewer`, `reference`, `input`, `output`, `palette`, `grid`, `evidence`, `checks`를 가진다. 순서는 `stage-gates.cjs`의 `EIGHT_NAMES`다. 공통 의미 검사는 기존 검증 함수를 재사용하지만, 신규 실행은 version 4만 허용한다.
 
-- 1단계: `colorGroups`, `execution: {version:1, route:fixed-asset-grid, sampling:source-region-area, operations:[...], fixedGridUserRequest:"사용자 조건과 선정 근거"}`. `operations`는 사용한 `eyePolicy/formPolicy/outlinePolicy/materialPlan`을 명시한다.
+- 1단계: `colorGroups`, `execution: {version:1, route:fixed-asset-grid, sampling:source-region-area, operations:[...], fixedGridUserRequest:"사용자 조건과 선정 근거"}`. `operations`는 사용한 `eyePolicy/formPolicy/outlinePolicy/materialPlan`을 명시한다. 사용자가 크기를 지정하지 않았으면 `fixedGridUserRequest` 대신 `sizeRequest: "unspecified"`를 쓴다. 지정하지 않은 요청 문장을 지어내지 않는다. 이 경우 4단계는 `selection.mode: compare`로 두 개 이상을 비교해야 하며 `user-fixed`는 차단된다.
 - 2단계: 같은 요청에 따라 검수한 비픽셀 원안. 이 출력이 변환 source다.
 - 3단계: `assignment: {plan, map}`. input/output은 같은 원안이다. source map은 실행 계획에서 재현되어야 한다.
-- 4단계: 실제 `native/expanded/outlineMask` 후보, 필수 경계 목록, 경계별 `coverage/width/continuity/flow/clearance`와 선택 이유를 `selection`에 기록한다. 고정 크기는 하나, 미지정은 둘 이상을 시험한다.
+- 4단계: 실제 `native/expanded/outlineMask` 후보, 필수 경계 목록, 경계별 `coverage/width/continuity/flow/clearance`와 선택 이유를 `selection`에 기록한다. 고정 크기는 하나, 미지정은 둘 이상을 시험한다. 후보 PNG는 같은 원안·캔버스·팔레트로 `node scripts/capacity-probe.cjs --source S.png --palette P.json --out DIR --background "#RRGGBB" --ink "#RRGGBB" 128x192 64x96`로 만든다. 출력의 판정은 `UNVERIFIED`이며 확대 PNG를 직접 보고 기록한다.
 - 5단계: `executionOptions('fixed-asset-grid', contract)`와 `layout` JSON 파일 증거. `source-line-layout.evidence(PNG, source, palette, options)`가 만든 결과를 재실행하여 대조한다. `LAYOUT_CHECKS`의 각 시각 항목도 따로 확인한다. 계획이 없는 경우에도 실행 증거는 생략하지 않는다.
 - 6단계: 실제 native 격자 초안. 7단계는 원안 대비 검수이며 이미지를 수정할 수 없다. 수정은 원인 단계로 돌아가 새 실행으로 한다.
 - 8단계: finalize가 잠긴 PNG 복사·재읽기 후 저장 기록을 만든다. verify가 기록과 실제 파일을 다시 확인한다.

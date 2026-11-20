@@ -115,3 +115,31 @@ C:/Users/tjdwo/.codex/visualizations/2026/10/15/01a13ea6-d785-7302-bf6e-4ddf6c26
 ```
 
 과거 `rapi-face-ownership-fix-20261119`는 사용자가 거부한 결과이고, 브라우저에 남은 `rapi-original-proportions-20261119/revision-3`도 이번 최신 결과가 아니다.
+
+## Claude 보강 — 2026-11-20 (`2.26.0-eight-stage.2-claude`, 브랜치 `claude/eight-stage-hardening`)
+
+새 원안 1장(오리지널 정비공, 128×192, 8px)을 실제로 생성해 8단계 정식 경로로 실행하면서 확인한 공용 코드 문제를 고쳤다. 사례 축약본과 근거는 `handoff/mechanic-eyes/`에 있다.
+
+| 문제 | 실행에서 본 현상 | 수정 |
+| --- | --- | --- |
+| 1px 안티앨리어싱 조각이 획 위상을 결정 | 눈꺼풀 본체 561px 외 4px·1px·1px 조각 때문에 prepare 중단. 다각형을 세 번 깎아야 통과 | `planSourceStroke`가 1/4칸 미만 조각을 제외하고 `ignoredSourceFragments`로 보고. 모두 작은 표식은 유지 |
+| 실패 위치 없음 | 메시지가 성분 수만 출력 | 위상·고리 실패에 `sourceComponents`(픽셀 수·범위)와 `nativeCells` 포함 |
+| 홍채 잉크 테두리가 눈꺼풀이 됨 | 6×6칸 눈에서 눈꺼풀 10칸, 어두운 홍채 149px→0칸, 눈이 검은 덩어리. 다른 눈은 원본에 없는 아래 테두리 | 열린 획이 원본에서 내부를 둘러싸면 중단. 두 칸 이상인 관찰 면이 0칸이 되면 선택 역할도 중단. 입력 계약에 고리 partition 작성법 추가 |
+| 크기 미지정인데 사용자 요청 문장 강제 | 비교 경로도 `fixedGridUserRequest` 없이는 차단 | `sizeRequest: "unspecified"` 허용(비교 선택만), 사용자 문장과 동시 사용 금지 |
+| 재질 영역 생성 수단 없음 | `regions` 없이 실행하면 주머니에 머리색, 렌치에 흰자색 등 고립 칸 | `scripts/derive-material-regions.cjs`: 재질표 → 평면 영역 다수결 → 행 영역·인벤토리·지도 PNG. 공유 색은 주변을 따름 |
+| 4단계 후보 PNG 생성 수단 없음 | 직사각형 격자 시험을 매번 직접 작성 | `scripts/capacity-probe.cjs` |
+
+검증:
+
+- 전체 시험 17/17 파일 통과.
+- 라피 재현은 기존 기록과 동일하다(`differentFromExpected 0`, 기존 후보 대비 34칸 그대로).
+- 새 시험 `test-eye-hardening.cjs` 4개는 77e9247 코드에서 실패하고 수정 후 통과한다.
+- 정비공 사례:
+  - 고리 partition과 수정 코드로 두 눈의 흰자·홍채·동공이 모두 남는다(run-03).
+  - 생성 영역 적용 후, 재질 지도 기준 위반 칸이 눈·잉크 밖에서 9개→1개로 줄었다(run-05).
+
+남은 범위:
+
+- 정비공의 lock/finalize/verify는 실행하지 않았다. 오른쪽 눈의 어두운 홍채 비중이 원본보다 크고, 앞머리 주변 잉크 조각이 남아 있다.
+- 고리 partition은 여전히 사람이 원본 좌표로 그린다. 자동 인식이 아니다.
+- 영역 생성기는 재질표가 맞을 때만 맞다. 눈 내부 지도는 눈 정책이 소유하므로 지도에서 다른 재질로 보일 수 있다.

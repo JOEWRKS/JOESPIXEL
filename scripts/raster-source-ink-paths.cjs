@@ -340,6 +340,12 @@ function planSourceStroke(mask,sw,sh,grid,w,h,{closed=false,anchor,allowCompactM
  const locate=(axis,v)=>{const a=grid[axis];let i=a.findIndex(([lo,hi])=>v>=lo&&v<hi);if(i<0)throw Error('Source stroke outside grid');return i+(v-a[i][0])/(a[i][1]-a[i][0]);};
  const step=grid.x[0][1]-grid.x[0][0];
  if(grid.x.length!==w||grid.y.length!==h||['x','y'].some(a=>grid[a].some(([lo,hi])=>Math.abs(hi-lo-step)>1e-8)))throw Error('Stroke geometry requires a uniform fixed grid');
+ // Antialias specks smaller than a quarter cell are not observed stroke
+ // structure. They must not decide connectivity or block a fitting stroke.
+ // A mark made only of small pieces (a compact detail) keeps every piece.
+ const components=sourceComponents(mask,sw),fragments=components.filter(c=>c.pixels.length<step*step/4);
+ const ignoredSourceFragments=fragments.length<components.length?fragments.map(c=>({pixels:c.pixels.length,bbox:c.bbox})):[];
+ if(ignoredSourceFragments.length){mask=new Set(mask);for(const c of fragments)for(const p of c.pixels)mask.delete(p);}
  let pathMask=mask,anchorReport=null,anchored=null;
  if(closed){
   // A declared closed boundary owns its cycle, not terminal medial-axis spurs
@@ -378,10 +384,24 @@ function planSourceStroke(mask,sw,sh,grid,w,h,{closed=false,anchor,allowCompactM
  }
  if(!cells.size||[...cells].some(p=>!footprint.has(p)))throw Error('Stroke cannot fit inside observed source coverage');
  const sourceTopology=strokeTopology(mask,sw,sh),nativeTopology=strokeTopology(cells,w,h);
- if(sourceTopology.components!==nativeTopology.components||sourceTopology.holes!==nativeTopology.holes){const error=Error('Stroke grid capacity changes source connections or gaps: '+JSON.stringify({sourceTopology,nativeTopology}));error.strokePlan={mask:[...mask],cells:[...cells],paths};throw error;}
+ const where=()=>({sourceComponents:sourceComponents(mask,sw).map(c=>({pixels:c.pixels.length,bbox:c.bbox})),nativeCells:[...cells].map(p=>[p%w,Math.floor(p/w)]),ignoredSourceFragments});
+ // An open stroke (eyelid, lash) whose observed pixels already enclose an
+ // interior usually carries a neighbouring rim that the partitions left in
+ // the base role. Rendering it would draw a closed ring the source lacks.
+ if(!closed&&sourceTopology.holes>0){const error=Error('Open stroke encloses a source interior; a rim outside the partitions was assigned to this stroke: '+JSON.stringify(where()));error.strokePlan={mask:[...mask],cells:[...cells],paths};throw error;}
+ if(sourceTopology.components!==nativeTopology.components||sourceTopology.holes!==nativeTopology.holes){const error=Error('Stroke grid capacity changes source connections or gaps: '+JSON.stringify({sourceTopology,nativeTopology,...where()}));error.strokePlan={mask:[...mask],cells:[...cells],paths};throw error;}
  const blocks=[...cells].filter(p=>p%w+1<w&&p+w+1<w*h&&[p+1,p+w,p+w+1].every(q=>cells.has(q)));
  if(blocks.length)throw Error('Stroke path contains solid two-cell thickness');
- return {cells,footprint,paths,sourceTopology,nativeTopology,...(anchorReport?{anchorReport}:{})};
+ return {cells,footprint,paths,sourceTopology,nativeTopology,...(anchorReport?{anchorReport}:{}),...(ignoredSourceFragments.length?{ignoredSourceFragments}:{})};
+}
+// 8-connected source components with pixel lists and [x0,y0,x1,y1] boxes.
+function sourceComponents(mask,w){
+ const seen=new Set(),out=[];
+ for(const s of mask){if(seen.has(s))continue;const pixels=[s];seen.add(s);let x0=s%w,x1=x0,y0=Math.floor(s/w),y1=y0;
+  for(let i=0;i<pixels.length;i++){const p=pixels[i],x=p%w,y=Math.floor(p/w);x0=Math.min(x0,x);x1=Math.max(x1,x);y0=Math.min(y0,y);y1=Math.max(y1,y);
+   for(let dy=-1;dy<=1;dy++)for(let dx=-1;dx<=1;dx++){if(!dx&&!dy)continue;const u=x+dx;if(u<0||u>=w)continue;const q=(y+dy)*w+u;if(mask.has(q)&&!seen.has(q)){seen.add(q);pixels.push(q);}}}
+  out.push({pixels,bbox:[x0,y0,x1,y1]});}
+ return out;
 }
 // Joint allocation of an observed OPEN curve. Source windows identify the
 // meaningful ends/turns; skeleton burrs never become protected output dots.

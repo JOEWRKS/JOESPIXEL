@@ -54,6 +54,9 @@ if(require.main===module){
  reject('one grid is not a comparison',l=>l.stages[1].selection.candidates.pop(),/at least two/);
  test('explicit fixed size tests capacity without manufacturing an alternative',()=>{const l=make();l.stages[0].execution.fixedGridUserRequest='User explicitly requires 3px';l.stages[1].selection.mode='user-fixed';l.stages[1].selection.candidates.pop();assert.equal(historical(l,2).status,'PASS');});
  reject('fixed size without user evidence is blocked',l=>{l.stages[1].selection.mode='user-fixed';l.stages[1].selection.candidates.pop();},/explicit user grid/);
+ test('unspecified size compares candidates without an invented user request',()=>{const l=make();delete l.stages[0].execution.fixedGridUserRequest;l.stages[0].execution.sizeRequest='unspecified';assert.equal(historical(l,2).status,'PASS');});
+ reject('unspecified size cannot claim a user-fixed grid',l=>{delete l.stages[0].execution.fixedGridUserRequest;l.stages[0].execution.sizeRequest='unspecified';l.stages[1].selection.mode='user-fixed';l.stages[1].selection.candidates.pop();},/explicit user grid|unspecified size must compare/);
+ reject('unspecified size cannot accompany a user request',l=>{l.stages[0].execution.fixedGridUserRequest='User requires 3px';l.stages[0].execution.sizeRequest='unspecified';},/sizeRequest may only/);
  reject('fixed size cannot hide failed boundary capacity',l=>{l.stages[0].execution.fixedGridUserRequest='User requires 3px';l.stages[1].selection.mode='user-fixed';l.stages[1].selection.candidates.pop();l.stages[1].selection.candidates[0].boundaries[0].continuity.status='FAIL';},/unresolved boundary/);
  reject('a failed selected candidate blocks work',l=>l.stages[1].selection.candidates[0].status='FAIL',/selected grid/);
  reject('coverage failure cannot hide in PASS',l=>l.stages[1].selection.candidates[0].boundaries[0].coverage.status='FAIL',/unresolved boundary/);
