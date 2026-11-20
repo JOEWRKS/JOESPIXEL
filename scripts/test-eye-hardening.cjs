@@ -86,4 +86,13 @@ test('one antialias pixel of pupil pigment does not block an observed pupil oval
  const right=build(c.rimInRing).eyePolicyReport.eyes.find(e=>e.name==='right-eye'),pupil=right.fillShapes.find(s=>s.role==='pupil');
  assert.equal(pupil.ignoredSourceFragments[0].pixels,1);assert.equal(pupil.cells.length,2);
 });
+test('an iris partition leaves the eye outer contour and skin to the surrounding material',()=>{
+ // Source (crop x151-155, y27-52): iris | rim | sclera strip | black eye contour | skin. The
+ // iris-right partition lists iris, dark iris and white only; it used to paint the contour dark
+ // iris (a 2x3 dark block in the eye corner) and the skin inside the polygon as sclera.
+ const r=build(c.rimInRing),right=r.eyePolicyReport.eyes.find(e=>e.name==='right-eye');
+ const at=(x,y)=>'#'+[0,1,2].map(k=>r.image.data[(y*24+x)*4+k].toString(16).padStart(2,'0')).join('').toUpperCase();
+ assert.equal(at(19,4),'#150D0A');for(const y of [3,4,5])assert(!['#224D29','#499246','#FAEDE6'].includes(at(19,y)),'contour column '+y+' '+at(19,y));
+ assert(right.partitionPixelsLeftToSurroundingMaterial>0);
+});
 console.log(JSON.stringify({passed,scope:'Stroke topology and eye-plane guards on synthetic masks and one real face crop; visual review still required.'}));

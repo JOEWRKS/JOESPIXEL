@@ -237,7 +237,7 @@ function placeSourceEyePartitions(PNG,source,baseline,palette,policy,grid,materi
  for(const eye of policy.eyes){
   contextCache.clear();
   const [rx,ry,rw,rh]=eye.rect;if(rx+rw>source.width||ry+rh>source.height)throw Error('Eye region outside source');
-  const roles=eye.roles.map(r=>({...r,labs:r.samples.map(toLab)})),labels=new Map(),sourceCounts=roles.map(()=>0),cache=new Map();
+  const roles=eye.roles.map(r=>({...r,labs:r.samples.map(toLab)})),labels=new Map(),sourceCounts=roles.map(()=>0),cache=new Map();let leftToSurround=0;
   // Optional coordinates bind observed context samples to this source and
   // its reviewed material. Stale hair/edge RGB cannot impersonate skin.
   for(const role of roles)if(role.samplePoints){
@@ -248,6 +248,11 @@ function placeSourceEyePartitions(PNG,source,baseline,palette,policy,grid,materi
     if(eye.contextRoles?.includes(role.name)&&material?.plan.regions.some(r=>r.material===role.family)){const owner=material.owners[q];if(owner<0||material.plan.regions[owner].material!==role.family)throw Error('Eye context sample has a different material owner');}
    }
   }
+  // Colours of the material outside the eye polygon inside its window, kept
+  // when they cover at least one cell: the planes a partition may yield to.
+  const surround=new Set();if(eye.partitions?.length){const counts=new Map(),cellArea=(grid.x[0][1]-grid.x[0][0])*(grid.y[0][1]-grid.y[0][0]);
+   for(let y=Math.floor(ry);y<Math.ceil(ry+rh);y++)for(let x=Math.floor(rx);x<Math.ceil(rx+rw);x++)if(!eyeOwnsSource(eye,x+.5,y+.5)){let c;try{c=contextAt(y*source.width+x,roles).color;}catch{continue;}counts.set(c,(counts.get(c)||0)+1);}
+   for(const [c,n] of counts)if(n>=cellArea)surround.add(c);}
   for(let y=Math.floor(ry);y<Math.ceil(ry+rh);y++)for(let x=Math.floor(rx);x<Math.ceil(rx+rw);x++){
    if(!eyeOwnsSource(eye,x+.5,y+.5))continue;
    const parts=eye.partitions.filter(p=>inSourcePolygon(x+.5,y+.5,p.sourcePolygon));if(parts.length>1)throw Error('Overlapping source eye partitions');
@@ -255,8 +260,22 @@ function placeSourceEyePartitions(PNG,source,baseline,palette,policy,grid,materi
    // is not evidence that every antialiased edge sample belongs to its fill.
    // Observed surrounding fills may compete; equal RGB stays with the
    // partition, so white glints and dark pupils keep their intended role.
-   const primary=parts[0]?.roles??eye.baseRoles,allowed=[...new Set([...primary,...(eye.contextRoles??[])])],q=y*source.width+x,key=primary.join('/')+':'+source.data.readUInt32BE(q*4);let role=cache.get(key);
-   if(role===undefined){const lab=toLab([...source.data.subarray(q*4,q*4+3)]);let best=Infinity;for(const name of allowed){const r=roles.findIndex(v=>v.name===name),d=Math.min(...roles[r].labs.map(s=>distance(s,lab)));if(d<best){best=d;role=r;}}cache.set(key,role);}
+   const primary=parts[0]?.roles??eye.baseRoles,allowed=[...new Set([...primary,...(eye.contextRoles??[])])],q=y*source.width+x;
+   // A partition decides between coincident pigments (pupil vs lid ink); it
+   // does not recolour pigment it does not list. The large eye's black outer
+   // contour inside an iris partition used to become dark iris (a dark block
+   // in the eye corner), and skin inside a generous polygon became sclera.
+   // A pixel nearer the colour of the material that surrounds the eye (skin,
+   // outline ink: at least one cell of it outside the polygon in the window)
+   // than to every partition role keeps that material, unless a partition
+   // role paints the same palette colour. An antialias grey between sclera
+   // and ink is not surrounding material and stays with the partition.
+   let context=null;if(parts.length)try{context=contextAt(q,roles);}catch{context=null;}
+   const key=allowed.join('/')+':'+(context?.color??'')+':'+source.data.readUInt32BE(q*4);let role=cache.get(key);
+   if(role===undefined){const lab=toLab([...source.data.subarray(q*4,q*4+3)]);let best=Infinity;for(const name of allowed){const r=roles.findIndex(v=>v.name===name),d=Math.min(...roles[r].labs.map(s=>distance(s,lab)));if(d<best){best=d;role=r;}}
+    if(context&&surround.has(context.color)&&!allowed.some(name=>roles.find(v=>v.name===name).color===context.color)){const k=palette.findIndex(p=>p.hex===context.color);if(distance(lab,paletteLabs[k])<best)role=null;}
+    cache.set(key,role);}
+   if(role===null){leftToSurround++;continue;}
    labels.set(q,role);sourceCounts[role]++;sourceRoleMap.data.writeUInt32BE(rgba(roles[role].color),q*4);
   }
   // Explicit semantic witnesses are stronger than ordinary RGB samples.
@@ -423,7 +442,7 @@ function placeSourceEyePartitions(PNG,source,baseline,palette,policy,grid,materi
   if(policy.geometryPolicy){const cellArea=(grid.x[0][1]-grid.x[0][0])*(grid.y[0][1]-grid.y[0][0]);
    for(let r=0;r<roles.length;r++)if(roles[r].required===false&&roles[r].geometry!=='feature'&&sourceCounts[r]>=2*cellArea&&![...nativeRoles.values()].includes(r)){
     const error=new Error('Eye joint placement erased an observed plane of '+(sourceCounts[r]/cellArea).toFixed(1)+' cells: '+eye.name+'/'+roles[r].name+'. Check whether a stroke role (lid) owns an ink rim inside this plane; give the rim to the plane partition.');error.fillShapes=fillShapes;throw error;}}
-  reports.push({name:eye.name,cells,roles:roles.map((r,i)=>({name:r.name,color:r.color,family:r.family,sourcePixels:sourceCounts[i],nativeCells:[...nativeRoles.values()].filter(v=>v===i).length})),reflection,geometry,fillShapes,...(attachmentReports.length?{attachments:attachmentReports}:{}),...(prunedStrokeCells.length?{prunedStrokeCells}:{}),...(scleraJoined?{lightPixelsMovedToWhite:scleraJoined}:{}),...(thickStrokeCells.length?{thickStrokeCells}:{})});
+  reports.push({name:eye.name,cells,roles:roles.map((r,i)=>({name:r.name,color:r.color,family:r.family,sourcePixels:sourceCounts[i],nativeCells:[...nativeRoles.values()].filter(v=>v===i).length})),reflection,geometry,fillShapes,...(attachmentReports.length?{attachments:attachmentReports}:{}),...(prunedStrokeCells.length?{prunedStrokeCells}:{}),...(scleraJoined?{lightPixelsMovedToWhite:scleraJoined}:{}),...(leftToSurround?{partitionPixelsLeftToSurroundingMaterial:leftToSurround}:{}),...(thickStrokeCells.length?{thickStrokeCells}:{})});
  }
  let changed=0;for(let p=0;p<baseline.width*baseline.height;p++)if(image.data.readUInt32BE(p*4)!==baseline.data.readUInt32BE(p*4))changed++;
  return {image,sourceRoleMap,report:{status:'AWAITING_SAVED_VISUAL_REVIEW',rule:'source-partitions/family-before-tone',changed,eyes:reports,limitation:'Observed source partitions and samples require visual review. Reproduction is not shape approval.'}};
