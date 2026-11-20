@@ -185,7 +185,8 @@
        ]
       ],
       "required": true,
-      "observation": "Thick dark upper lid and inner lash flick."
+      "observation": "Thick dark upper lid and inner lash flick.",
+      "thickness": "one-dot"
      },
      {
       "name": "white",
@@ -426,7 +427,8 @@
        ]
       ],
       "required": true,
-      "observation": "Thick dark upper lid with an outer lash flick; touches the hair contour at its outer top."
+      "observation": "Thick dark upper lid with an outer lash flick; touches the hair contour at its outer top.",
+      "thickness": "one-dot"
      },
      {
       "name": "white",
@@ -772,7 +774,8 @@
        ]
       ],
       "required": true,
-      "observation": "Thick dark upper lid and inner lash flick."
+      "observation": "Thick dark upper lid and inner lash flick.",
+      "thickness": "source"
      },
      {
       "name": "white",
@@ -851,7 +854,8 @@
        ]
       ],
       "required": true,
-      "protect": true
+      "protect": true,
+      "shape": "source-oval"
      },
      {
       "name": "light",
@@ -1095,7 +1099,8 @@
        ]
       ],
       "required": true,
-      "observation": "Thick dark upper lid with an outer lash flick; touches the hair contour at its outer top."
+      "observation": "Thick dark upper lid with an outer lash flick; touches the hair contour at its outer top.",
+      "thickness": "source"
      },
      {
       "name": "white",
@@ -1179,7 +1184,8 @@
        ]
       ],
       "required": true,
-      "protect": true
+      "protect": true,
+      "shape": "source-oval"
      },
      {
       "name": "light",

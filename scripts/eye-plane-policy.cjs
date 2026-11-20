@@ -48,6 +48,7 @@ function assertEyePolicy(policy,palette){
   for(const r of e.roles){
    if(policy.geometryPolicy&&(!['stroke','fill','feature'].includes(r.geometry)||(r.geometry==='stroke'&&r.width!==1)))throw Error('Explicit eye stroke/fill/feature geometry and one-dot stroke width required');
    if(r.closed!==undefined&&(r.geometry!=='stroke'||typeof r.closed!=='boolean'))throw Error('Only observed stroke geometry may declare a closed loop');
+   if(r.thickness!==undefined&&(!['source','one-dot'].includes(r.thickness)||r.geometry!=='stroke'||r.closed===true))throw Error('Eye stroke thickness is "source" or "one-dot" on an open observed stroke');
    if(r.anchor!==undefined&&(r.anchor!=='interior'||r.closed!==true||!r.interiorRoles?.length))throw Error('Eye interior anchor requires a closed stroke with observed interior roles');
    if(!policy.geometryPolicy&&r.geometry!==undefined)throw Error('Eye geometry annotation cannot be silently ignored');
    if(r.shape!==undefined&&(!['source-oval','source-family-oval'].includes(r.shape)||r.geometry!=='fill'||r.protect!==true||policy.geometryPolicy!=='source-stroke-fill'))throw Error('Observed oval shape requires a protected source fill');
@@ -147,8 +148,16 @@ function placeObservedOvals(image,source,grid,roles,labels,overlaps,nativeRoles,
  const ordered=roles.map((_,r)=>r).filter(r=>roles[r].shape).sort((a,b)=>Number(roles[b].shape==='source-family-oval')-Number(roles[a].shape==='source-family-oval'));
  for(const r of ordered){
   const familyShape=roles[r].shape==='source-family-oval',belongs=role=>familyShape?roles[role]?.family===roles[r].family:role===r;
-  const points=[...labels].filter(([,role])=>belongs(role)).map(([q])=>q);
+  let points=[...labels].filter(([,role])=>belongs(role)).map(([q])=>q);
   if(!points.length)throw Error('Observed oval source fill absent');
+  // An antialias speck of the same pigment elsewhere in the partition (one
+  // dark pixel at the lid edge) is not part of the observed shape. As for
+  // strokes, pieces under a quarter cell are set aside when a larger body
+  // exists; a real second piece still blocks as fragmented.
+  const quarter=(grid.x[0][1]-grid.x[0][0])*(grid.y[0][1]-grid.y[0][0])/4,pieces=[],left=new Set(points);
+  for(const s of points){if(!left.has(s))continue;left.delete(s);const piece=[s];for(let i=0;i<piece.length;i++){const x=piece[i]%source.width,y=Math.floor(piece[i]/source.width);for(const[nx,ny]of [[x-1,y],[x+1,y],[x,y-1],[x,y+1]]){const n=ny*source.width+nx;if(nx>=0&&nx<source.width&&left.delete(n))piece.push(n);}}pieces.push(piece);}
+  const ignoredSourceFragments=pieces.length>1&&pieces.some(p=>p.length>=quarter)?pieces.filter(p=>p.length<quarter).map(p=>({pixels:p.length,at:[p[0]%source.width,Math.floor(p[0]/source.width)]})):[];
+  if(ignoredSourceFragments.length)points=pieces.filter(p=>p.length>=quarter).flat();
   const xs=points.map(q=>q%source.width),ys=points.map(q=>Math.floor(q/source.width)),minX=Math.min(...xs),minY=Math.min(...ys),maxX=Math.max(...xs)+1,maxY=Math.max(...ys)+1;
   const stepX=grid.x[0][1]-grid.x[0][0],stepY=grid.y[0][1]-grid.y[0][0];
   if(grid.x.some(([a,b])=>Math.abs(b-a-stepX)>1e-6)||grid.y.some(([a,b])=>Math.abs(b-a-stepY)>1e-6))throw Error('Observed oval requires a uniform grid');
@@ -193,7 +202,7 @@ function placeObservedOvals(image,source,grid,roles,labels,overlaps,nativeRoles,
    const replacement=[...votes].sort((a,b)=>b[1]-a[1])[0]?.[0];if(replacement===undefined)throw Error('Oval has no source-supported adjacent fill');image.data.writeUInt32BE(rgba(roles[replacement].color),p*4);nativeRoles.set(p,replacement);nativeFamilies.set(p,roles[replacement].family);cleared.push(p);
   }
   for(const p of best.cells){image.data.writeUInt32BE(rgba(roles[r].color),p*4);nativeRoles.set(p,r);nativeFamilies.set(p,roles[r].family);}
-  reports.push({role:roles[r].name,shape:roles[r].shape,sourceBounds:[minX,minY,maxX-minX,maxY-minY],sourceCenter:[cx,cy],nativeExtent:[width,height],cells:best.cells,cleared,sourceSupported:true,centerDisplacementCells:Math.sqrt(best.centerError),placement:best.nearest?'nearest-source-center':'source-supported-beside-stroke'});
+  reports.push({role:roles[r].name,shape:roles[r].shape,sourceBounds:[minX,minY,maxX-minX,maxY-minY],sourceCenter:[cx,cy],nativeExtent:[width,height],cells:best.cells,cleared,sourceSupported:true,centerDisplacementCells:Math.sqrt(best.centerError),placement:best.nearest?'nearest-source-center':'source-supported-beside-stroke',...(ignoredSourceFragments.length?{ignoredSourceFragments}:{})});
  }
  return reports;
 }
@@ -312,6 +321,27 @@ function placeSourceEyePartitions(PNG,source,baseline,palette,policy,grid,materi
       if(own<cellArea/2&&own<median/2&&fill>own&&fill>=cellArea/4){plan.cells.delete(p);strokeClaims.delete(p);prunedStrokeCells.push({role:roles[plan.role].name,cell:[p%W,Math.floor(p/W)],strokePixels:own,fillPixels:fill});again=true;}
      }}
    }}
+  // A thick anime lid is a pigment mass, not a line drawn thick: the one-dot
+  // path keeps one row and the vote below skips stroke pixels, so the second
+  // source row was handed to the neighbouring fill (a 2-row lid became a dark
+  // iris band). A vacated cell beside the path whose own stroke pigment covers
+  // at least half of it, and with that path cell carries at least 1.5 cells
+  // of pigment (the source band rounds to two rows), is a measured mass cell.
+  // `thickness: "source"` keeps it as same-pigment plane (SKILL: outline-colour
+  // planes are fills); otherwise it is only reported as `thickStrokeCells`.
+  const massClaims=new Map(),thickStrokeCells=[];
+  if(policy.geometryPolicy){const cellArea=(grid.x[0][1]-grid.x[0][0])*(grid.y[0][1]-grid.y[0][0]),W=image.width,H=image.height;
+   const coverage=(p,r)=>{const [a,b]=grid.x[p%W],[c,d]=grid.y[Math.floor(p/W)];let n=0;for(let sy=Math.floor(c);sy<Math.ceil(d);sy++)for(let sx=Math.floor(a);sx<Math.ceil(b);sx++)if(labels.get(sy*source.width+sx)===r)n++;return n;};
+   for(const plan of strokePlans){if(roles[plan.role].closed)continue;
+    for(const v of plan.footprint){if(plan.cells.has(v)||strokeClaims.has(v)||massClaims.has(v))continue;const own=coverage(v,plan.role);if(own<cellArea/2)continue;
+     const x=v%W,y=Math.floor(v/W),beside=[[x-1,y],[x+1,y],[x,y-1],[x,y+1]].filter(([u,w])=>u>=0&&u<W&&w>=0&&w<H).map(([u,w])=>w*W+u).filter(p=>plan.cells.has(p));
+     if(!beside.some(p=>coverage(p,plan.role)+own>=1.5*cellArea))continue;
+     thickStrokeCells.push({role:roles[plan.role].name,cell:[x,y],strokePixels:own,kept:roles[plan.role].thickness==='source'});
+     if(roles[plan.role].thickness==='source'){massClaims.set(v,plan.role);plan.massCells=(plan.massCells??[]).concat(v);}
+    }}
+   const undecided=thickStrokeCells.filter(c=>roles.find(r=>r.name===c.role).thickness===undefined);
+   if(undecided.length)throw Error('Eye stroke is a source mass of two rows at '+JSON.stringify(undecided.map(c=>c.cell))+': '+eye.name+'/'+undecided[0].role+'. Declare thickness "source" to keep the observed thick lid as same-pigment plane, or "one-dot" to thin it after reviewing the source.');
+  }
   for(let y=0;y<image.height;y++)for(let x=0;x<image.width;x++){
    const [a,b]=grid.x[x],[c,d]=grid.y[y];if(a>=rx+rw||b<=rx||c>=ry+rh||d<=ry)continue;
    const groups=new Map(),p=y*image.width+x,interiorPlan=strokePlans.find(plan=>plan.nativeInterior?.has(p));let owned=0;
@@ -333,7 +363,7 @@ function placeSourceEyePartitions(PNG,source,baseline,palette,policy,grid,materi
     tone.role=[...tone.roleWeights].sort((a,b)=>b[1]-a[1]||(roles[b[0]]?.protect===true)-(roles[a[0]]?.protect===true))[0][0];
    }
    if(!owned)continue;if(claimed.has(p))throw Error('Overlapping eye cell ownership');claimed.add(p);cells.push(p);
-   if(strokeClaims.has(p)){const r=strokeClaims.get(p);image.data.writeUInt32BE(rgba(roles[r].color),p*4);nativeRoles.set(p,r);nativeFamilies.set(p,roles[r].family);continue;}
+   if(strokeClaims.has(p)||massClaims.has(p)){const r=strokeClaims.get(p)??massClaims.get(p);image.data.writeUInt32BE(rgba(roles[r].color),p*4);nativeRoles.set(p,r);nativeFamilies.set(p,roles[r].family);continue;}
    if(!groups.size&&interiorPlan){
     const cx=(a+b)/2,cy=(c+d)/2,candidates=[...interiorPlan.sourceInterior].filter(q=>!wrongSide(q)&&labels.has(q)&&roles[labels.get(q)].geometry!=='stroke'&&(!interiorPlan.interiorRoles||interiorPlan.interiorRoles.has(labels.get(q))));
     candidates.sort((u,v)=>(u%source.width+.5-cx)**2+(Math.floor(u/source.width)+.5-cy)**2-((v%source.width+.5-cx)**2+(Math.floor(v/source.width)+.5-cy)**2));
@@ -381,7 +411,7 @@ function placeSourceEyePartitions(PNG,source,baseline,palette,policy,grid,materi
   // Unknown context is not proof of a filled shape. Previously every dark
   // sample outside a clipped eye polygon silently exempted a duplicate rim.
   const explicitContextFills=new Set((material?.plan.regions??[]).filter(r=>r.geometry==='fill').map(r=>r.material));
-  const geometry=policy.geometryPolicy?{executed:true,strokes:strokePlans.map(p=>({role:roles[p.role].name,color:roles[p.role].color,cells:[...p.cells],footprint:[...p.footprint],sameColorFill:[...nativeRoles].filter(([q,r])=>r!==p.role&&(roles[r]?.geometry==='fill'||roles[r]?.geometry==='feature'||explicitContextFills.has(nativeFamilies.get(q)))&&image.data.readUInt32BE(q*4)===rgba(roles[p.role].color)).map(([q])=>q),sourceTopology:p.sourceTopology,nativeTopology:p.nativeTopology})),width:1}:null;
+  const geometry=policy.geometryPolicy?{executed:true,strokes:strokePlans.map(p=>({role:roles[p.role].name,color:roles[p.role].color,cells:[...p.cells],...(p.massCells?{massCells:p.massCells}:{}),footprint:[...p.footprint],sameColorFill:[...nativeRoles].filter(([q,r])=>r!==p.role&&(roles[r]?.geometry==='fill'||roles[r]?.geometry==='feature'||explicitContextFills.has(nativeFamilies.get(q)))&&image.data.readUInt32BE(q*4)===rgba(roles[p.role].color)).map(([q])=>q),sourceTopology:p.sourceTopology,nativeTopology:p.nativeTopology})),width:1}:null;
   if(geometry)for(let i=0;i<strokePlans.length;i++){
    const plan=strokePlans[i];if(plan.anchorReport)geometry.strokes[i].anchor=plan.anchorReport;
    if(plan.interiorRoles)for(const[p,r]of nativeRoles)if(plan.interiorRoles.has(r)&&!plan.nativeInterior.has(p))throw Error('Closed eye interior role escaped its allocated rim: '+eye.name+'/'+roles[r].name+' at '+p);
@@ -393,7 +423,7 @@ function placeSourceEyePartitions(PNG,source,baseline,palette,policy,grid,materi
   if(policy.geometryPolicy){const cellArea=(grid.x[0][1]-grid.x[0][0])*(grid.y[0][1]-grid.y[0][0]);
    for(let r=0;r<roles.length;r++)if(roles[r].required===false&&roles[r].geometry!=='feature'&&sourceCounts[r]>=2*cellArea&&![...nativeRoles.values()].includes(r)){
     const error=new Error('Eye joint placement erased an observed plane of '+(sourceCounts[r]/cellArea).toFixed(1)+' cells: '+eye.name+'/'+roles[r].name+'. Check whether a stroke role (lid) owns an ink rim inside this plane; give the rim to the plane partition.');error.fillShapes=fillShapes;throw error;}}
-  reports.push({name:eye.name,cells,roles:roles.map((r,i)=>({name:r.name,color:r.color,family:r.family,sourcePixels:sourceCounts[i],nativeCells:[...nativeRoles.values()].filter(v=>v===i).length})),reflection,geometry,fillShapes,...(attachmentReports.length?{attachments:attachmentReports}:{}),...(prunedStrokeCells.length?{prunedStrokeCells}:{}),...(scleraJoined?{lightPixelsMovedToWhite:scleraJoined}:{})});
+  reports.push({name:eye.name,cells,roles:roles.map((r,i)=>({name:r.name,color:r.color,family:r.family,sourcePixels:sourceCounts[i],nativeCells:[...nativeRoles.values()].filter(v=>v===i).length})),reflection,geometry,fillShapes,...(attachmentReports.length?{attachments:attachmentReports}:{}),...(prunedStrokeCells.length?{prunedStrokeCells}:{}),...(scleraJoined?{lightPixelsMovedToWhite:scleraJoined}:{}),...(thickStrokeCells.length?{thickStrokeCells}:{})});
  }
  let changed=0;for(let p=0;p<baseline.width*baseline.height;p++)if(image.data.readUInt32BE(p*4)!==baseline.data.readUInt32BE(p*4))changed++;
  return {image,sourceRoleMap,report:{status:'AWAITING_SAVED_VISUAL_REVIEW',rule:'source-partitions/family-before-tone',changed,eyes:reports,limitation:'Observed source partitions and samples require visual review. Reproduction is not shape approval.'}};
@@ -407,8 +437,8 @@ function auditEyePolicy(PNG,source,saved,palette,policy,grid,material=null){
  }
  const geometryExecuted=!policy.geometryPolicy||policy.visibility==='not-visible'||replay.report.eyes.every(e=>e.geometry?.executed===true);
  const strokes=replay.report.eyes.flatMap(e=>(e.geometry?.strokes??[]).map(s=>{
-  const expected=new Set(s.cells),fills=new Set(s.sameColorFill),ink=rgba(s.color);
-  return {eye:e.name,role:s.role,missingCells:s.cells.filter(p=>saved.data.readUInt32BE(p*4)!==ink),excessInk:s.footprint.filter(p=>!expected.has(p)&&!fills.has(p)&&saved.data.readUInt32BE(p*4)===ink)};
+  const expected=new Set([...s.cells,...(s.massCells??[])]),fills=new Set(s.sameColorFill),ink=rgba(s.color);
+  return {eye:e.name,role:s.role,missingCells:[...expected].filter(p=>saved.data.readUInt32BE(p*4)!==ink),excessInk:s.footprint.filter(p=>!expected.has(p)&&!fills.has(p)&&saved.data.readUInt32BE(p*4)===ink)};
  }));
  const strokeFailures=strokes.some(s=>s.missingCells.length||s.excessInk.length);
  return {status:replay.report.changed||missingRoles.length||!geometryExecuted||strokeFailures?'FAIL':policy.visibility==='not-visible'?'NOT_APPLICABLE':'PASS',geometryExecuted:policy.geometryPolicy?geometryExecuted:null,strokes,nonconformingCells:replay.report.changed,missingRoles,visual:'UNVERIFIED',report:replay.report};
