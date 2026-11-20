@@ -50,10 +50,11 @@ function assertEyePolicy(policy,palette){
    if(r.closed!==undefined&&(r.geometry!=='stroke'||typeof r.closed!=='boolean'))throw Error('Only observed stroke geometry may declare a closed loop');
    if(r.anchor!==undefined&&(r.anchor!=='interior'||r.closed!==true||!r.interiorRoles?.length))throw Error('Eye interior anchor requires a closed stroke with observed interior roles');
    if(!policy.geometryPolicy&&r.geometry!==undefined)throw Error('Eye geometry annotation cannot be silently ignored');
-   if(r.shape!==undefined&&(r.shape!=='source-oval'||r.geometry!=='fill'||r.protect!==true||policy.geometryPolicy!=='source-stroke-fill'))throw Error('Observed oval shape requires a protected source fill');
+   if(r.shape!==undefined&&(!['source-oval','source-family-oval'].includes(r.shape)||r.geometry!=='fill'||r.protect!==true||policy.geometryPolicy!=='source-stroke-fill'))throw Error('Observed oval shape requires a protected source fill');
    if(!r.name||!allowed.has(r.color)||!r.colors?.length||!r.colors.includes(r.color)||r.colors.some(c=>!allowed.has(c)||(policy.placement!=='source-partitions'&&seen.has(c))))throw Error('Eye role colors must be unambiguous fixed palette entries');
    r.colors.forEach(c=>seen.add(c));
    if(!r.samples?.length||r.samples.some(a=>!Array.isArray(a)||a.length!==3||a.some(v=>!Number.isFinite(v)||v<0||v>255)))throw Error('Observed source RGB samples required');
+   if(r.verifySampleOwnership!==undefined&&(typeof r.verifySampleOwnership!=='boolean'||policy.placement!=='source-partitions'||r.verifySampleOwnership&&(!r.samplePoints?.length||r.samplePoints.length!==r.samples.length)))throw Error('Semantic eye samples require source partitions and matching sample points');
   }
   if(policy.placement==='source-partitions'){
    const names=new Set(e.roles.map(r=>r.name)),validPolygon=p=>Array.isArray(p)&&p.length>=3&&p.every(v=>Array.isArray(v)&&v.length===2&&v.every(Number.isFinite)&&v[0]>=e.rect[0]&&v[0]<=e.rect[0]+e.rect[2]&&v[1]>=e.rect[1]&&v[1]<=e.rect[1]+e.rect[3]);
@@ -143,35 +144,56 @@ function applyEyePolicy(PNG,source,baseline,palette,policy,grid,material=null){
 // that shape's vote. No global area quota moves a pupil to another location.
 function placeObservedOvals(image,source,grid,roles,labels,overlaps,nativeRoles,nativeFamilies,strokeClaims){
  const reports=[];
- for(let r=0;r<roles.length;r++){
-  if(roles[r].shape!=='source-oval')continue;
-  const points=[...labels].filter(([,role])=>role===r).map(([q])=>q);
+ const ordered=roles.map((_,r)=>r).filter(r=>roles[r].shape).sort((a,b)=>Number(roles[b].shape==='source-family-oval')-Number(roles[a].shape==='source-family-oval'));
+ for(const r of ordered){
+  const familyShape=roles[r].shape==='source-family-oval',belongs=role=>familyShape?roles[role]?.family===roles[r].family:role===r;
+  const points=[...labels].filter(([,role])=>belongs(role)).map(([q])=>q);
   if(!points.length)throw Error('Observed oval source fill absent');
   const xs=points.map(q=>q%source.width),ys=points.map(q=>Math.floor(q/source.width)),minX=Math.min(...xs),minY=Math.min(...ys),maxX=Math.max(...xs)+1,maxY=Math.max(...ys)+1;
   const stepX=grid.x[0][1]-grid.x[0][0],stepY=grid.y[0][1]-grid.y[0][0];
   if(grid.x.some(([a,b])=>Math.abs(b-a-stepX)>1e-6)||grid.y.some(([a,b])=>Math.abs(b-a-stepY)>1e-6))throw Error('Observed oval requires a uniform grid');
-  const cx=xs.reduce((a,b)=>a+b+.5,0)/points.length,cy=ys.reduce((a,b)=>a+b+.5,0)/points.length,width=Math.max(1,Math.round((maxX-minX)/stepX)),height=Math.max(1,Math.round((maxY-minY)/stepY));
+  const cx=xs.reduce((a,b)=>a+b+.5,0)/points.length,cy=ys.reduce((a,b)=>a+b+.5,0)/points.length;
+  let width=Math.max(1,Math.round((maxX-minX)/stepX)),height=Math.max(1,Math.round((maxY-minY)/stepY));
+  if(familyShape){
+   // A bounding box overstates a rounded iris. Select the small integer
+   // footprint using its actual pigment area as well as its two extents.
+   const ex=(maxX-minX)/stepX,ey=(maxY-minY)/stepY,area=points.length/(stepX*stepY),sizes=[];
+   for(const w of new Set([Math.max(1,Math.floor(ex)),Math.max(1,Math.ceil(ex))]))for(const h of new Set([Math.max(1,Math.floor(ey)),Math.max(1,Math.ceil(ey))])){
+    let n=0;for(let y=0;y<h;y++)for(let x=0;x<w;x++)if(((x+.5-w/2)/(w/2))**2+((y+.5-h/2)/(h/2))**2<=1)n++;
+    sizes.push({w,h,cost:Math.abs(n-area)+Math.abs(w-ex)+Math.abs(h-ey)+area*Math.abs(Math.log((w/h)/(ex/ey)))});
+   }
+   sizes.sort((a,b)=>a.cost-b.cost||a.w*a.h-b.w*b.h);width=sizes[0].w;height=sizes[0].h;
+  }
   const remaining=new Set(points),queue=[points[0]];remaining.delete(points[0]);
   for(let i=0;i<queue.length;i++){const q=queue[i],x=q%source.width,y=Math.floor(q/source.width);for(const[nx,ny]of [[x-1,y],[x+1,y],[x,y-1],[x,y+1]]){const n=ny*source.width+nx;if(nx>=0&&nx<source.width&&ny>=0&&ny<source.height&&remaining.delete(n))queue.push(n);}}
-  if(remaining.size||points.length/((maxX-minX)*(maxY-minY))<.5)throw Error('Observed oval is fragmented or not a compact fill');
+  if(remaining.size||points.length/((maxX-minX)*(maxY-minY))<.5)throw Error('Observed oval is fragmented or not a compact fill: '+roles[r].name+' bounds '+[minX,minY,maxX,maxY]+' disconnected '+remaining.size+' source pixels '+points.length);
   const votes=new Map();for(const q of points)for(const[p,weight]of overlaps.get(q)??[])votes.set(p,(votes.get(p)||0)+weight);
-  const gx=(cx-grid.x[0][0])/stepX,gy=(cy-grid.y[0][0])/stepY,candidates=[];
+  const gx=(cx-grid.x[0][0])/stepX,gy=(cy-grid.y[0][0])/stepY,candidates=[];let nearestBlockedByStroke=false;
   for(let y=Math.floor(gy-height/2)-1;y<=Math.ceil(gy-height/2)+1;y++)for(let x=Math.floor(gx-width/2)-1;x<=Math.ceil(gx-width/2)+1;x++){
-   if(x<0||y<0||x+width>image.width||y+height>image.height||Math.abs(x+width/2-gx)>.51||Math.abs(y+height/2-gy)>.51)continue;
+   if(x<0||y<0||x+width>image.width||y+height>image.height)continue;
+   const dx=Math.abs(x+width/2-gx),dy=Math.abs(y+height/2-gy),nearest=dx<=.51&&dy<=.51;
+   if(!nearest&&(!strokeClaims.size||dx>1||dy>1))continue;
    const cells=[];for(let yy=0;yy<height;yy++)for(let xx=0;xx<width;xx++)if(((xx+.5-width/2)/(width/2))**2+((yy+.5-height/2)/(height/2))**2<=1)cells.push((y+yy)*image.width+x+xx);
-   if(cells.some(p=>!votes.has(p)||nativeFamilies.get(p)!==roles[r].family||strokeClaims.has(p)||(nativeRoles.get(p)!==r&&(roles[nativeRoles.get(p)]?.protect||roles[nativeRoles.get(p)]?.geometry==='feature'))))continue;
+   if(nearest&&cells.every(p=>votes.has(p))&&cells.some(p=>strokeClaims.has(p)))nearestBlockedByStroke=true;
+   if(cells.some(p=>!votes.has(p)||(!familyShape&&nativeFamilies.get(p)!==roles[r].family)||strokeClaims.has(p)||(nativeRoles.get(p)!==r&&(roles[nativeRoles.get(p)]?.protect||roles[nativeRoles.get(p)]?.geometry==='feature')&&!(roles[nativeRoles.get(p)]?.family===roles[r].family&&(familyShape||roles[nativeRoles.get(p)]?.shape==='source-family-oval')))))continue;
+   if(familyShape&&roles.some((role,k)=>role.family!==roles[r].family&&role.required!==false&&[...nativeRoles].some(([,v])=>v===k)&&![...nativeRoles].some(([p,v])=>v===k&&!cells.includes(p))))continue;
    const overlap=cells.reduce((sum,p)=>sum+votes.get(p),0),error=cells.length*stepX*stepY+points.length-2*overlap;
-   candidates.push({cells,error,centerError:(x+width/2-gx)**2+(y+height/2-gy)**2});
+   candidates.push({cells,error,centerError:(x+width/2-gx)**2+(y+height/2-gy)**2,nearest});
   }
-  candidates.sort((a,b)=>a.error-b.error||a.centerError-b.centerError||a.cells[0]-b.cells[0]);const best=candidates[0];
+  // Keep the ordinary nearest-centroid result whenever it fits. If an actual
+  // planned eyelid occupies that cell, consider the other source-supported
+  // side of the quantization boundary, without enlarging the pupil or moving
+  // it outside its own pigment/family. This is not a general translation.
+  const feasible=candidates.filter(c=>c.nearest||nearestBlockedByStroke);
+  feasible.sort((a,b)=>Number(b.nearest)-Number(a.nearest)||a.error-b.error||a.centerError-b.centerError||a.cells[0]-b.cells[0]);const best=feasible[0];
   if(!best)throw Error('Observed oval cannot fit without invading a feature or shifting its center');
   const selected=new Set(best.cells),cleared=[];
-  for(const[p,old]of nativeRoles)if(old===r&&!selected.has(p)){
-   const x=p%image.width,y=Math.floor(p/image.width),votes=new Map();for(let sy=Math.floor(grid.y[y][0]);sy<grid.y[y][1];sy++)for(let sx=Math.floor(grid.x[x][0]);sx<grid.x[x][1];sx++){const k=labels.get(sy*source.width+sx);if(k!==r&&roles[k]?.family===roles[r].family&&roles[k].geometry==='fill'&&!roles[k].protect)votes.set(k,(votes.get(k)||0)+1);}
-   const replacement=[...votes].sort((a,b)=>b[1]-a[1])[0]?.[0];if(replacement===undefined)throw Error('Oval has no same-family adjacent fill');image.data.writeUInt32BE(rgba(roles[replacement].color),p*4);nativeRoles.set(p,replacement);cleared.push(p);
+  for(const[p,old]of nativeRoles)if(belongs(old)&&!selected.has(p)){
+   const x=p%image.width,y=Math.floor(p/image.width),votes=new Map();for(let sy=Math.floor(grid.y[y][0]);sy<grid.y[y][1];sy++)for(let sx=Math.floor(grid.x[x][0]);sx<grid.x[x][1];sx++){const k=labels.get(sy*source.width+sx);if(roles[k]&&!belongs(k)&&(familyShape?roles[k].family!==roles[r].family:roles[k].family===roles[r].family)&&roles[k].geometry==='fill'&&!roles[k].protect)votes.set(k,(votes.get(k)||0)+1);}
+   const replacement=[...votes].sort((a,b)=>b[1]-a[1])[0]?.[0];if(replacement===undefined)throw Error('Oval has no source-supported adjacent fill');image.data.writeUInt32BE(rgba(roles[replacement].color),p*4);nativeRoles.set(p,replacement);nativeFamilies.set(p,roles[replacement].family);cleared.push(p);
   }
-  for(const p of best.cells){image.data.writeUInt32BE(rgba(roles[r].color),p*4);nativeRoles.set(p,r);}
-  reports.push({role:roles[r].name,sourceBounds:[minX,minY,maxX-minX,maxY-minY],sourceCenter:[cx,cy],nativeExtent:[width,height],cells:best.cells,cleared,sourceSupported:true,centerDisplacementCells:Math.sqrt(best.centerError)});
+  for(const p of best.cells){image.data.writeUInt32BE(rgba(roles[r].color),p*4);nativeRoles.set(p,r);nativeFamilies.set(p,roles[r].family);}
+  reports.push({role:roles[r].name,shape:roles[r].shape,sourceBounds:[minX,minY,maxX-minX,maxY-minY],sourceCenter:[cx,cy],nativeExtent:[width,height],cells:best.cells,cleared,sourceSupported:true,centerDisplacementCells:Math.sqrt(best.centerError),placement:best.nearest?'nearest-source-center':'source-supported-beside-stroke'});
  }
  return reports;
 }
@@ -227,6 +249,13 @@ function placeSourceEyePartitions(PNG,source,baseline,palette,policy,grid,materi
    const primary=parts[0]?.roles??eye.baseRoles,allowed=[...new Set([...primary,...(eye.contextRoles??[])])],q=y*source.width+x,key=primary.join('/')+':'+source.data.readUInt32BE(q*4);let role=cache.get(key);
    if(role===undefined){const lab=toLab([...source.data.subarray(q*4,q*4+3)]);let best=Infinity;for(const name of allowed){const r=roles.findIndex(v=>v.name===name),d=Math.min(...roles[r].labs.map(s=>distance(s,lab)));if(d<best){best=d;role=r;}}cache.set(key,role);}
    labels.set(q,role);sourceCounts[role]++;sourceRoleMap.data.writeUInt32BE(rgba(roles[role].color),q*4);
+  }
+  // Explicit semantic witnesses are stronger than ordinary RGB samples.
+  // A partition can otherwise exclude its own lid/rim sample and silently
+  // recolor that pigment as iris. Outside context samples remain permitted.
+  for(let r=0;r<roles.length;r++)if(roles[r].verifySampleOwnership===true)for(const [x,y]of roles[r].samplePoints??[]){
+   const actual=labels.get(y*source.width+x);
+   if(actual!==r)throw Error('Eye source sample assigned to another role: '+eye.name+'/'+roles[r].name+' at '+x+','+y+' -> '+(roles[actual]?.name??'outside ownership'));
   }
   const attachmentReports=[];
   for(let r=0;r<roles.length;r++)if(roles[r].attachedFill){
@@ -303,7 +332,7 @@ function placeSourceEyePartitions(PNG,source,baseline,palette,policy,grid,materi
   if(light>=0&&eye.reflection==='if-room')for(const [q,r] of labels){
    if(r!==light||visited.has(q))continue;const part=[q];visited.add(q);
    for(let i=0;i<part.length;i++){const x=part[i]%source.width,y=Math.floor(part[i]/source.width);for(const [nx,ny]of[[x-1,y],[x+1,y],[x,y-1],[x,y+1]]){if(nx<0||nx>=source.width||ny<0||ny>=source.height)continue;const n=ny*source.width+nx;if(labels.get(n)===light&&!visited.has(n)){visited.add(n);part.push(n);}}}
-   if(part.length<3)continue;const votes=new Map();for(const q of part)for(const [p,w] of overlaps.get(q)??[])votes.set(p,(votes.get(p)||0)+w);
+   if(part.length<3){reflection.push({status:'omitted-subpixel-source-mark',sourcePixels:part.length});continue;}const votes=new Map();for(const q of part)for(const [p,w] of overlaps.get(q)??[])votes.set(p,(votes.get(p)||0)+w);
    const candidates=[...votes].sort((a,b)=>b[1]-a[1]||a[0]-b[0]);
    // Sclera outside the iris is not proof that an iris highlight survived.
    if(candidates.some(([p])=>nativeFamilies.get(p)===roles[light].family&&nativeRoles.get(p)===light)){reflection.push({status:'represented',sourcePixels:part.length});continue;}
@@ -311,7 +340,7 @@ function placeSourceEyePartitions(PNG,source,baseline,palette,policy,grid,materi
    let chosen=null;
    for(const [p] of candidates){
     if(nativeFamilies.get(p)!==roles[light].family)continue;const old=nativeRoles.get(p);
-    if(roles[old]?.protect===true||roles[old]?.geometry==='stroke')continue;
+    if(roles[old]?.protect===true&&roles[old]?.shape!=='source-family-oval'||roles[old]?.geometry==='stroke')continue;
     if([...nativeFamilies.values()].filter(v=>v===roles[light].family).length<3)continue;
     if(roles[old]?.required!==false&&![...nativeRoles].some(([q,r])=>q!==p&&r===old))continue;
     const x=p%image.width,y=Math.floor(p/image.width),adjacent=[[x-1,y],[x+1,y],[x,y-1],[x,y+1]].filter(([x,y])=>x>=0&&x<image.width&&y>=0&&y<image.height).map(([x,y])=>y*image.width+x);
@@ -328,7 +357,7 @@ function placeSourceEyePartitions(PNG,source,baseline,palette,policy,grid,materi
    const plan=strokePlans[i];if(plan.anchorReport)geometry.strokes[i].anchor=plan.anchorReport;
    if(plan.interiorRoles)for(const[p,r]of nativeRoles)if(plan.interiorRoles.has(r)&&!plan.nativeInterior.has(p))throw Error('Closed eye interior role escaped its allocated rim: '+eye.name+'/'+roles[r].name+' at '+p);
   }
-  if(policy.geometryPolicy)for(let r=0;r<roles.length;r++)if(roles[r].required!==false&&sourceCounts[r]&&![...nativeRoles.values()].includes(r))throw Error('Eye joint placement erased required role: '+roles[r].name);
+  if(policy.geometryPolicy)for(let r=0;r<roles.length;r++)if(roles[r].required!==false&&sourceCounts[r]&&![...nativeRoles.values()].includes(r)){const error=new Error('Eye joint placement erased required role: '+eye.name+'/'+roles[r].name);error.fillShapes=fillShapes;throw error;}
   reports.push({name:eye.name,cells,roles:roles.map((r,i)=>({name:r.name,color:r.color,family:r.family,sourcePixels:sourceCounts[i],nativeCells:[...nativeRoles.values()].filter(v=>v===i).length})),reflection,geometry,fillShapes,...(attachmentReports.length?{attachments:attachmentReports}:{})});
  }
  let changed=0;for(let p=0;p<baseline.width*baseline.height;p++)if(image.data.readUInt32BE(p*4)!==baseline.data.readUInt32BE(p*4))changed++;

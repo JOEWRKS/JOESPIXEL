@@ -1,0 +1,31 @@
+test-conversion-trace.cjs: PASS
+PASS trace isolation, identical rendering, saved failure evidence and no overwrite
+test-delivery.cjs: PASS
+{"passed":38,"scope":"Synthetic eight-stage delivery gates and deterministic replay; no visual quality claim"}
+test-eye-boundary-ownership.cjs: PASS
+{"passed":9,"scope":"Mechanical source-ownership regression; not visual approval"}
+test-eye-policy.cjs: PASS
+17 eye policy checks passed
+test-line-plane-layout.cjs: PASS
+{"passed":9,"scope":"Joint allocation mechanics only; visual inspection remains required."}
+test-material-assignment.cjs: PASS
+{"passed":28,"scope":"Ownership/stage-gate mechanics only, not artwork quality","directory":"C:\\Users\\tjdwo\\AppData\\Local\\Temp\\material-assignment-test-QxaprS"}
+test-observed-details.cjs: PASS
+11 tests passed.
+test-outline-source.cjs: PASS
+PASS: source paths, local ink colors, unchanged inner marks/shade, replay, saved-line defect detection, grid/role guards and broad-fill rejection
+test-owned-stroke-bands.cjs: PASS
+{"status":"PASS","checks":29}
+test-palette-native.cjs: PASS
+115 tests passed.
+test-pixel-capacity.cjs: PASS
+{"passed":27,"scope":"Synthetic records, actual PNG consistency and entry blocking only; no artwork visual approval","directory":"C:\\Users\\tjdwo\\AppData\\Local\\Temp\\pixel-capacity-test-nO8dFz"}
+test-required-forms.cjs: PASS
+28 required-form tests passed
+test-source-curve-flow.cjs: PASS
+{"tests":13,"status":"PASS","scope":"Curve geometry and guards, not automatic visual approval"}
+test-source-ink-evidence.cjs: PASS
+{"tests":7,"status":"PASS","scope":"Source role continuity only; saved image needs separate visual review"}
+test-stage-gates.cjs: PASS
+{"passed":76,"scope":"Stage ordering, artifact integrity and entry blocking; no art quality claim","fixtureDirectory":"C:\\Users\\tjdwo\\AppData\\Local\\Temp\\pixel-five-stage-PW64Pp"}
+15/15 test files passed. Synthetic tests do not approve artwork.

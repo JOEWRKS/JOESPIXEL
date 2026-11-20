@@ -1,0 +1,350 @@
+{
+  "status": "SCOPED_CORRECTION_READY_FOR_USER_REVIEW",
+  "source": {
+    "path": "LOCAL_HISTORICAL_ARTIFACT",
+    "sha256": "9db45563fb8ce5ca6573c2ad5abc953b184c46654c193dedba47e13957b0af42"
+  },
+  "palette": {
+    "path": "LOCAL_HISTORICAL_ARTIFACT",
+    "sha256": "4370bb36f1d2ee4ddccb2fa3ee0bb30a200f740e4f40906af12381bdd1855926"
+  },
+  "before": {
+    "path": "LOCAL_HISTORICAL_ARTIFACT",
+    "sha256": "1f5b3df0d88a1a84e767a93fc8f44e5c8bef434e8199f996cc8559310a117c78"
+  },
+  "after": {
+    "path": "LOCAL_HISTORICAL_ARTIFACT",
+    "sha256": "ae1ee51aaf847f05520bb98828cfa48257a57557089d29a203cd69323dbc9a5c"
+  },
+  "display": {
+    "path": "LOCAL_HISTORICAL_ARTIFACT",
+    "sha256": "d81e0caf940283ec9731f735605182c09324f67ad5e6317ca71bc8db80874fe1"
+  },
+  "changedCells": 34,
+  "changedOutsideLayout": 0,
+  "changedEyeCells": 0,
+  "grid": {
+    "native": [
+      128,
+      192
+    ],
+    "cell": 8,
+    "canvas": [
+      1024,
+      1536
+    ]
+  },
+  "exactBlocks": true,
+  "stats": {
+    "width": 128,
+    "height": 192,
+    "colorsUsed": 32,
+    "usedHex": [
+      "#24242D",
+      "#464653",
+      "#4D454B",
+      "#5E5B66",
+      "#6A4B48",
+      "#6D2431",
+      "#6E6066",
+      "#794F4C",
+      "#795B59",
+      "#7B7580",
+      "#8C6456",
+      "#913E3C",
+      "#9A8186",
+      "#9D98A0",
+      "#A3292C",
+      "#A78075",
+      "#AB756B",
+      "#C3A5A0",
+      "#C3BEC5",
+      "#C6A38F",
+      "#CC9787",
+      "#D43730",
+      "#DED7CC",
+      "#E4C9AA",
+      "#E8B99F",
+      "#EBE7EA",
+      "#F15A3D",
+      "#F4D3B7",
+      "#F9E6BF",
+      "#FF9556",
+      "#FFF7E6",
+      "#FFFFFF"
+    ],
+    "offPaletteExamples": [],
+    "offPalettePixels": 0,
+    "partialAlphaPixels": 0,
+    "transparentPixels": 0
+  },
+  "stroke": {
+    "status": "PASS",
+    "sourceExteriorChecked": true,
+    "changedSourceExteriorPixels": 0,
+    "changedImmutablePixels": 0,
+    "renderedStrokeChecked": true,
+    "exteriorClosureChecked": true,
+    "exposedMaterialPixels": 0,
+    "outsideDeclaredBandPixels": 0,
+    "missingPathPixels": 0,
+    "residualBandInk": 0,
+    "solidRenderedStrokeBlocks": 0,
+    "changedFillPixels": 0,
+    "changedProtectedPixels": 0,
+    "checkedSourcePaths": 5095,
+    "checkedBandCells": 8977,
+    "sourceSupportedFillCells": 224,
+    "locations": {
+      "sourceExterior": [],
+      "missing": [],
+      "residual": [],
+      "exposedMaterial": [],
+      "blocks": []
+    },
+    "scope": "Declared whole source stroke bands; broad source fill and locked features retain distinct ownership. Visual source completeness remains a separate review."
+  },
+  "surfaces": {
+    "status": "PASS",
+    "surfaces": [
+      {
+        "id": "overlapping-tapered-locks",
+        "missingBoundary": [],
+        "lostSurface": [],
+        "lostPlanes": []
+      }
+    ],
+    "scope": "Source-observed surface/perimeter obligations; not automatic visual or anatomical approval."
+  },
+  "stage5MatchesRendering": true,
+  "changedCoordinates": [
+    [
+      64,
+      16
+    ],
+    [
+      67,
+      16
+    ],
+    [
+      68,
+      16
+    ],
+    [
+      59,
+      17
+    ],
+    [
+      67,
+      17
+    ],
+    [
+      68,
+      17
+    ],
+    [
+      56,
+      18
+    ],
+    [
+      57,
+      18
+    ],
+    [
+      59,
+      18
+    ],
+    [
+      61,
+      18
+    ],
+    [
+      67,
+      18
+    ],
+    [
+      68,
+      18
+    ],
+    [
+      56,
+      19
+    ],
+    [
+      57,
+      19
+    ],
+    [
+      67,
+      19
+    ],
+    [
+      68,
+      19
+    ],
+    [
+      57,
+      20
+    ],
+    [
+      63,
+      20
+    ],
+    [
+      68,
+      20
+    ],
+    [
+      56,
+      21
+    ],
+    [
+      57,
+      21
+    ],
+    [
+      62,
+      21
+    ],
+    [
+      63,
+      21
+    ],
+    [
+      66,
+      21
+    ],
+    [
+      56,
+      22
+    ],
+    [
+      59,
+      22
+    ],
+    [
+      65,
+      22
+    ],
+    [
+      66,
+      22
+    ],
+    [
+      59,
+      23
+    ],
+    [
+      62,
+      23
+    ],
+    [
+      64,
+      23
+    ],
+    [
+      65,
+      23
+    ],
+    [
+      58,
+      24
+    ],
+    [
+      63,
+      24
+    ]
+  ],
+  "limitations": [
+    "Source-observed paths/planes are supplied as input; this is not automatic hair recognition.",
+    "Subcell fading roots and a narrow parallel return are omitted explicitly. Individual smooth tips are still quantized; this is not exact original-line reconstruction.",
+    "The preserved prior image is an unapproved comparison candidate; unchanged pixels are not evidence of their visual quality."
+  ],
+  "visual": {
+    "planes": "Separate connected brown planes replace several black crossings in the left and central fringe.",
+    "tips": "Shared observed tips now meet at one grid location; the right-lock endpoint is no longer displaced by more than two cells.",
+    "gap": "The central peach wedge is represented separately from the warm hair; the smallest parallel sliver cannot retain two lines plus a gap at their source positions.",
+    "preservation": "Eyes, mouth and all cells outside the observed layout are byte-identical to the previous candidate."
+  },
+  "receipt": {
+    "path": "LOCAL_HISTORICAL_ARTIFACT",
+    "sha256": "8e4a472c38f6ddc901022a66beb4e2ab866f6c517d26bb396d8922a7966730db"
+  },
+  "eightStages": [
+    {
+      "stage": 1,
+      "name": "request-analysis",
+      "status": "PASS"
+    },
+    {
+      "stage": 2,
+      "name": "source-design",
+      "status": "PASS"
+    },
+    {
+      "stage": 3,
+      "name": "material-assignment",
+      "status": "PASS"
+    },
+    {
+      "stage": 4,
+      "name": "pixel-capacity",
+      "status": "PASS"
+    },
+    {
+      "stage": 5,
+      "name": "line-plane-layout",
+      "status": "PASS"
+    },
+    {
+      "stage": 6,
+      "name": "grid-draft",
+      "status": "PASS"
+    },
+    {
+      "stage": 7,
+      "name": "visual-verification",
+      "status": "PASS"
+    },
+    {
+      "stage": 8,
+      "name": "saved-verification",
+      "status": "PASS"
+    }
+  ],
+  "draftPreservation": {
+    "status": "PASS",
+    "changedNativePixels": 0,
+    "changedDisplayPixels": 0,
+    "mode": "byte-copy-only",
+    "strokeAudit": {
+      "status": "PASS",
+      "sourceExteriorChecked": true,
+      "changedSourceExteriorPixels": 0,
+      "changedImmutablePixels": 0,
+      "renderedStrokeChecked": true,
+      "exteriorClosureChecked": true,
+      "exposedMaterialPixels": 0,
+      "outsideDeclaredBandPixels": 0,
+      "missingPathPixels": 0,
+      "residualBandInk": 0,
+      "solidRenderedStrokeBlocks": 0,
+      "changedFillPixels": 0,
+      "changedProtectedPixels": 0,
+      "checkedSourcePaths": 5095,
+      "checkedBandCells": 8977,
+      "sourceSupportedFillCells": 224,
+      "locations": {
+        "sourceExterior": [],
+        "missing": [],
+        "residual": [],
+        "exposedMaterial": [],
+        "blocks": []
+      },
+      "scope": "Declared whole source stroke bands; broad source fill and locked features retain distinct ownership. Visual source completeness remains a separate review."
+    }
+  },
+  "userAcceptance": "NOT_ASSESSED",
+  "scope": "Fringe correction and no-regression comparison, not exact reconstruction or retrospective approval of the baseline.",
+  "portability": "Summary of historical checks; paths redacted. Not a replayable lock or receipt. Source/output hashes are retained."
+}

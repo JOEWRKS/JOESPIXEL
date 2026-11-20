@@ -16,7 +16,8 @@ function inside(x,y,polygon){let result=false;for(let i=0,j=polygon.length-1;i<p
 }return result;}
 function compile(PNG,source,palette,width,height,plan,policies){
  const sw=source.width,sh=source.height,cell=sw/width;
- need(plan?.version===1&&Object.keys(plan).every(k=>['version','sourcePixelsSha256','paletteColors','grid','boundaryPolicySha256','observation','regions','protectedFeatures','inventory','unassigned','surfaces','preserveOutside','roleWitnesses'].includes(k)),'unsupported plan fields');
+ need(plan?.version===1&&Object.keys(plan).every(k=>['version','sourcePixelsSha256','paletteColors','grid','boundaryPolicySha256','observation','regions','protectedFeatures','inventory','unassigned','surfaces','preserveOutside','roleWitnesses','lineLayouts'].includes(k)),'unsupported plan fields');
+ require('./source-line-layout.cjs').validate(plan.lineLayouts,sw,sh,palette);
  need(text(plan.observation)&&plan.sourcePixelsSha256===hash(source.data),'source pixels changed');
  need(JSON.stringify(plan.paletteColors)===JSON.stringify(palette.map(p=>p.hex)),'palette changed');
  need(Number.isInteger(cell)&&cell>0&&sh/height===cell&&JSON.stringify(plan.grid)===JSON.stringify({native:[width,height],cell,canvas:[sw,sh],origin:[0,0]}),'fixed uniform grid changed');

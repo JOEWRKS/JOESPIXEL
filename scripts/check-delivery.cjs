@@ -14,7 +14,7 @@ function checkDelivery(contractPath, reviewPath, PNG) {
   const contractBytes = fs.readFileSync(contractPath);
   const contract = JSON.parse(contractBytes);
   const review = JSON.parse(fs.readFileSync(reviewPath));
-  requireValue(!contract.redesign && !contract.measuredConversion && !contract.mode, 'Retired conversion route; use the seven-stage fixed-grid workflow');
+  requireValue(!contract.redesign && !contract.measuredConversion && !contract.mode, 'Retired conversion route; use the eight-stage fixed-grid workflow');
   requireValue(contract.eyePolicy?.coordinateSource !== 'reference', 'Eye coordinates must use the current pixel design');
   const contractDir = path.dirname(path.resolve(contractPath));
   const reviewDir = path.dirname(path.resolve(reviewPath));

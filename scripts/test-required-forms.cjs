@@ -194,4 +194,25 @@ test('level seam with alternative cap rows cannot acquire an unobserved central 
  const r=planObservedCurve(mask,64,64,g,8,8,curve),rows=r.curve.orderedCells.map(p=>Math.floor(p/8));
  assert.equal(new Set(rows).size,1,'A cap option must not produce a center rise and return');assert.equal(r.cells.size,5);assert.deepEqual(r.nativeTopology,{components:1,holes:0});
 });
+test('explicit compact source detail survives as its occupied cell without changing neighbours',()=>{
+ const source=fill(128,64,skin),base=fill(16,8,skin),pixels=[[18,18],[18,19],[19,19],[19,20],[20,21]];
+ for(const[x,y]of pixels)rect(source,x,y,1,1,ink);
+ const original=Buffer.from(source.data),f={...feature,name:'compact observed mark',priority:'optional',sourceRegion:[14,14,12,12]};
+ const r=allocateRequiredForms(PNG,source,base,grid,palette,{version:1,placement:'source-path',features:[f]});
+ assert.equal(r.report.features[0].action,'source-path-and-adjacent-fill');assert.equal(r.report.features[0].cells,1);
+ for(let q=0;q<128;q++)assert.equal(r.image.data.readUInt32BE(q*4),q===2*16+2?ink:skin);
+ assert(source.data.equals(original));
+ assert(allocateRequiredForms(PNG,source,r.image,grid,palette,{version:1,placement:'source-path',features:[{...f,name:'different subject'}]}).image.data.equals(r.image.data));
+});
+test('compact-detail opt-in does not collapse rings, separate marks or required curves',()=>{
+ const {planSourceStroke,planObservedCurve}=require('./raster-source-ink-paths.cjs');
+ const mark=new Set([18*128+18,19*128+18,19*128+19,20*128+19,21*128+20]);
+ assert.throws(()=>planSourceStroke(mark,128,64,grid,16,8),/cannot fit/);
+ const split=new Set([18*128+18,21*128+21]);
+ assert.throws(()=>planSourceStroke(split,128,64,grid,16,8,{allowCompactMark:true}));
+ const ring=new Set();for(let y=18;y<=22;y++)for(let x=18;x<=22;x++)if(x===18||x===22||y===18||y===22)ring.add(y*128+x);
+ assert.throws(()=>planSourceStroke(ring,128,64,grid,16,8,{allowCompactMark:true,closed:true}));
+ const curve={version:1,axis:'y',flow:'smooth',observation:'Both endpoints occupy the same cell; it cannot represent a required curve.',landmarks:[{name:'start',kind:'endpoint',sourceRegion:[17,17,3,3]},{name:'end',kind:'endpoint',sourceRegion:[19,20,3,3]}]};
+ assert.throws(()=>planObservedCurve(mark,128,64,grid,16,8,curve),/collapse/);
+});
 console.log(count+' required-form tests passed');

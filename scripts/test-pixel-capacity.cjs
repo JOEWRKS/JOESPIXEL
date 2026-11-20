@@ -48,7 +48,7 @@ if(require.main===module){
  test('six stages permit records without automatic visual truth',()=>assert.equal(historical(make(),5).visualTruth,'NOT_AUTOMATICALLY_DETERMINED'));
  test('stage one can leave pixel size undecided',()=>assert.equal(historical(make(),1).next,2));
  test('capacity can finish before design',()=>assert.equal(historical(make(), 'capacity').next,3));
- test('legacy production is blocked',()=>assert.throws(()=>gate.assertProductionStages({version:1},2),/Seven-stage/));
+ test('legacy production is blocked',()=>assert.throws(()=>gate.assertProductionStages({version:1},2),/Eight-stage/));
  test('missing capacity cannot be skipped',()=>{const l=make();l.stages.splice(1,1);assert.throws(()=>historical(l,2),/Stage 2/);});
  const reject=(name,mutate,pattern)=>test(name,()=>{const l=make();mutate(l);assert.throws(()=>historical(l,5),pattern);});
  reject('one grid is not a comparison',l=>l.stages[1].selection.candidates.pop(),/at least two/);
@@ -80,7 +80,7 @@ if(require.main===module){
   const l=make();l.stages=l.stages.slice(0,3);l.stages[1].status='FAIL';
   const cp=path.join(dir,'contract.json'),jp=path.join(dir,'job.json'),out=path.join(dir,'forbidden-output');
   fs.writeFileSync(cp,JSON.stringify({source,palette,width:4,height:4,scale:3,stageChecks:l}));fs.writeFileSync(jp,JSON.stringify({contract:cp}));
-  assert.throws(()=>require('./run-pixel-workflow.cjs').prepare(jp,out,PNG),/Seven-stage/);assert(!fs.existsSync(out));
+  assert.throws(()=>require('./run-pixel-workflow.cjs').prepare(jp,out,PNG),/Eight-stage/);assert(!fs.existsSync(out));
  });
  console.log(JSON.stringify({passed,scope:'Synthetic records, actual PNG consistency and entry blocking only; no artwork visual approval',directory:dir}));
 }

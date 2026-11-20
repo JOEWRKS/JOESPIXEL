@@ -3,12 +3,12 @@
 // coordinates, character names or post-render painting are accepted here.
 function planMaterialSurfaces(source,base,labels,material,features,inkRoles){
  const fills=new Map(),lines=new Map(),domain=new Set(),reservedFill=new Set(),sourceStrokeBand=new Set(),sourceDomain=new Set(),replaceCells=new Set(),reports=[];
- if(!material?.plan.surfaces?.length)return {fills,lines,domain,reservedFill,sourceStrokeBand,sourceDomain,replaceCells,reports};
+ if(!material?.plan?.surfaces?.length&&!material?.plan?.lineLayouts?.length)return {fills,lines,domain,reservedFill,sourceStrokeBand,sourceDomain,replaceCells,reports};
  const sw=source.width,sh=source.height,w=base.width,h=base.height,step=sw/w;
  const neighbors=(p,W,H)=>{const x=p%W,y=Math.floor(p/W),a=[];if(x)a.push(p-1);if(x+1<W)a.push(p+1);if(y)a.push(p-W);if(y+1<H)a.push(p+W);return a;};
  const protectedCells=new Set(features.cells);
  for(let p=0;p<material.exceptions.length;p++)if(material.exceptions[p])protectedCells.add(Math.floor(p/sw/step)*w+Math.floor(p%sw/step));
- for(const surface of material.plan.surfaces){
+ for(const surface of material.plan.surfaces??[]){
   const ink=new Set((inkRoles.find(r=>r.color===surface.contourColor)?.paletteColors??[surface.contourColor]).map(c=>parseInt(c.slice(1)+'ff',16)));
   const members=new Set(material.plan.regions.flatMap((r,i)=>surface.regionIds.includes(r.id)?[i]:[]));
   const mask=new Uint8Array(sw*sh),weights=new Map(),tones=new Map();
@@ -63,14 +63,20 @@ function planMaterialSurfaces(source,base,labels,material,features,inkRoles){
   }
   reports.push({id:surface.id,colors:region.colors,contourColor:surface.contourColor,sourcePixels:mask.reduce((a,b)=>a+b,0),fillCells:[...inside].filter(p=>!protectedCells.has(p)),boundaryCandidates:[...rim],pathCells:[...contour],vacatedCells:vacated,contour:'joint-surface-perimeter'});
  }
+ const layout=require('./source-line-layout.cjs').plan(source,base,labels,material,features);
+ for(const p of layout.domain){if(domain.has(p))throw Error('Surface and line-plane layout domains overlap');domain.add(p);replaceCells.add(p);}
+ for(const[p,c]of layout.fills){fills.set(p,c);reservedFill.add(p);}
+ for(const[p,c]of layout.lines)lines.set(p,c);
+ for(const r of layout.reports){const owned=new Set(r.paths.flatMap(p=>p.cells));reports.push({id:r.id,colors:[...new Set(r.planes.flatMap(p=>p.colors))],contourColor:layout.lines.values().next().value,pathColors:[...layout.lines].filter(([p])=>owned.has(p)),fillCells:[],pathCells:[...owned],jointLayout:r});}
  for(const p of lines.keys())if(fills.has(p))throw Error('Observed surfaces compete for the same line/fill cell');
- return {fills,lines,domain,reservedFill,sourceStrokeBand,sourceDomain,replaceCells,reports};
+ return {fills,lines,domain,reservedFill,sourceStrokeBand,sourceDomain,replaceCells,reports,layoutDomain:layout.domain};
 }
 function auditMaterialSurfaces(image,reports){
  const surfaces=reports.map(s=>{
-  const colors=new Set(s.colors.map(c=>parseInt(c.slice(1)+'ff',16))),ink=parseInt(s.contourColor.slice(1)+'ff',16);
-  return {id:s.id,missingBoundary:s.pathCells.filter(p=>image.data.readUInt32BE(p*4)!==ink),lostSurface:s.fillCells.filter(p=>!colors.has(image.data.readUInt32BE(p*4)))};
+  const colors=new Set(s.colors.map(c=>parseInt(c.slice(1)+'ff',16))),ink=parseInt(s.contourColor.slice(1)+'ff',16),pathColors=new Map((s.pathColors??[]).map(([p,c])=>[p,parseInt(c.slice(1)+'ff',16)]));
+  const lostPlanes=(s.jointLayout?.planes??[]).flatMap(plane=>{const allowed=new Set(plane.colors.map(c=>parseInt(c.slice(1)+'ff',16)));return plane.route.filter(p=>!allowed.has(image.data.readUInt32BE(p*4))).map(p=>({plane:plane.id,cell:p}));});
+  return {id:s.id,missingBoundary:s.pathCells.filter(p=>image.data.readUInt32BE(p*4)!==(pathColors.get(p)??ink)),lostSurface:s.fillCells.filter(p=>!colors.has(image.data.readUInt32BE(p*4))),lostPlanes};
  });
- return {status:surfaces.some(s=>s.missingBoundary.length||s.lostSurface.length)?'FAIL':surfaces.length?'PASS':'NOT_APPLICABLE',surfaces,scope:'Source-observed surface/perimeter obligations; not automatic visual or anatomical approval.'};
+ return {status:surfaces.some(s=>s.missingBoundary.length||s.lostSurface.length||s.lostPlanes.length)?'FAIL':surfaces.length?'PASS':'NOT_APPLICABLE',surfaces,scope:'Source-observed surface/perimeter obligations; not automatic visual or anatomical approval.'};
 }
 module.exports={planMaterialSurfaces,auditMaterialSurfaces};

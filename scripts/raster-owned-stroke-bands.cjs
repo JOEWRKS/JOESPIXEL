@@ -71,7 +71,7 @@ function joint(PNG,source,base,palette,policy,material,features,sharedLabels,tra
  const writeLocked=new Set([...locked,...(material?.fixedCells?.keys()??[])]);
  const shareSurfaceBoundary=set=>{
   if(!surfaceLayout.lines.size)return set;
-  const removed=new Set([...set].filter(p=>surfaceLayout.replaceCells.has(p))),contacts=new Set([...set].filter(p=>!removed.has(p)&&adj(p,w,h,true).some(q=>removed.has(q))));
+  const removed=new Set([...set].filter(p=>surfaceLayout.replaceCells.has(p))),contacts=new Set([...set].filter(p=>!removed.has(p)&&adj(p,w,h,true).some(q=>removed.has(q)&&!surfaceLayout.layoutDomain?.has(q))));
   for(const p of removed)set.delete(p);for(const p of surfaceLayout.lines.keys())if(!locked.has(p))set.add(p);
   // Retained branches must reach the relocated shared boundary at a source-
   // supported junction. Leaving their old ends dangling opens false exterior.

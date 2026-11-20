@@ -229,7 +229,7 @@ function buildNative(PNG, source, palette, width, height, background, sampling =
   if(eyePolicy)require('./eye-plane-policy.cjs').assertEyePolicy(eyePolicy,palette);
   if(materialPlan && sampling!=='source-region-area')throw Error('Material assignment requires source-region-area; no ignored plan or fallback');
   const material=materialPlan?require('./material-assignment.cjs').compile(PNG,source,palette,width,height,require('./material-assignment.cjs').readPlan(materialPlan),{eyePolicy,formPolicy,outlinePolicy}):null;
-  if((material?.fixedCells.size||material?.plan.surfaces?.length)&&outlinePolicy?.layout!=='joint-source-band')throw Error('Surface and preservation constraints require joint-source-band; no ignored contract');
+  if((material?.fixedCells.size||material?.plan.surfaces?.length||material?.plan.lineLayouts?.length)&&outlinePolicy?.layout!=='joint-source-band')throw Error('Surface and preservation constraints require joint-source-band; no ignored contract');
   const built=buildCandidate(PNG,source,palette,width,height,background,sampling,protection,regions,structure,eyePolicy,material,outlinePolicy?.layout==='joint-source-band');
   const requireClaims=(image,claims,phase)=>{
     const changed=claims.filter(([p,c])=>image.data.readUInt32BE(p*4)!==c);

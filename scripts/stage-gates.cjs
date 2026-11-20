@@ -15,6 +15,9 @@ const SIX_CHECKS=[CHECKS[0],CAPACITY_CHECKS,...CHECKS.slice(1)];
 const ASSIGNMENT_CHECKS=['regionSeparation','boundaryConflicts','materialOwnership','allowedColors','featureExceptions','boundaryOwnership','ambiguity','comparison'];
 const SEVEN_NAMES=[...SIX_NAMES.slice(0,3),'material-assignment',...SIX_NAMES.slice(3)];
 const SEVEN_CHECKS=[...SIX_CHECKS.slice(0,3),ASSIGNMENT_CHECKS,...SIX_CHECKS.slice(3)];
+const EIGHT_NAMES=['request-analysis','source-design','material-assignment','pixel-capacity','line-plane-layout','grid-draft','visual-verification','saved-verification'];
+const LAYOUT_CHECKS=['requiredLines','connectedPlanes','tipsAndGaps','featureConflicts','sourceSupport'];
+const EIGHT_CHECKS=[CHECKS[0],CHECKS[1],ASSIGNMENT_CHECKS,CAPACITY_CHECKS,LAYOUT_CHECKS,CHECKS[2],[...new Set([...CHECKS[3],...CHECKS[4]])],['savedReadback','immutableCopy']];
 const hash=b=>crypto.createHash('sha256').update(b).digest('hex');
 const DETAIL_CHECKS={
  skin:['basePlane','shading','featureSeparation','blushDecision'],
@@ -52,11 +55,12 @@ function validateExecution(plan){
 function assertExecution(ledger,route,config){
  const plan=ledger?.stages?.[0]?.execution;
  validateExecution(plan);
- const options=ledger?.stages?.[ledger?.version===3?3:ledger?.version===2?2:1]?.executionOptions;
+ const options=ledger?.stages?.[ledger?.version===4?4:ledger?.version===3?3:ledger?.version===2?2:1]?.executionOptions;
  if(plan.route!==route||plan.sampling!==config.sampling||JSON.stringify(stable(options))!==JSON.stringify(stable(executionOptions(route,config))))throw Error('Execution differs from locked stages: no implicit sampler, resize route or repair substitution; revise the plan and rerun affected stages');
  return {status:'MATCH',route,sampling:plan.sampling};
 }
 function assertStages(ledger,through,expected={}){
+ if(ledger?.version===4)return assertEightStages(ledger,through,expected);
  const fail=(stage,message,status='UNVERIFIED')=>{const e=new Error(`Stage ${stage}: ${message}`);e.stage=stage;e.status=status;throw e;};
  const seven=ledger?.version===3,six=seven||ledger?.version===2,total=seven?7:six?6:5,designStage=six?3:2,optionsStage=seven?4:designStage;
  if(!Number.isInteger(through)||through<1||through>total)throw Error('Stage gate requires a stage from 1 to '+total);
@@ -155,10 +159,55 @@ function assertStages(ledger,through,expected={}){
 // repair=4, review=5). New production must include the separate capacity stage.
 // Legacy assertStages remains available for read-only historical inspection.
 function assertProductionStages(ledger,milestone,expected={}){
- if(ledger?.version!==3)throw Error('Seven-stage record required: material-assignment is mandatory; earlier records are audit-only');
+ if(ledger?.version!==4)throw Error('Eight-stage record required: executable line-plane layout is mandatory; earlier stage record required for audit only');
  if(milestone!=='capacity'&&(!Number.isInteger(milestone)||milestone<1||milestone>5))throw Error('Invalid production milestone');
- const through=milestone==='capacity'?2:milestone===1?1:milestone+2;
+ const through=milestone==='capacity'?4:milestone===1?2:milestone===2?5:milestone===3?6:7;
  return assertStages(ledger,through,expected);
+}
+// The legacy semantic checks remain one implementation. Reorder their audit
+// projection only; the eight-stage record and executable layout are checked
+// independently and never manufactured or marked PASS by this adapter.
+function assertEightStages(ledger,through,expected={}){
+ const need=(v,m)=>{if(!v)throw Error('Eight-stage gate: '+m);};
+ need(Number.isInteger(through)&&through>=1&&through<=8&&Array.isArray(ledger.stages),'invalid stage count');
+ const stages=ledger.stages,asset=a=>{need(a&&path.isAbsolute(a.path??'')&&hash(fs.readFileSync(a.path))===a.sha256,'Changed artifact or missing absolute-path evidence');return a.sha256;};
+ for(let i=0;i<through;i++){
+  const s=stages[i];need(s?.stage===i+1&&s.name===EIGHT_NAMES[i]&&s.status==='PASS'&&s.reviewer,'missing, failed or reordered '+EIGHT_NAMES[i]);
+  for(const key of EIGHT_CHECKS[i])need(s.checks?.[key]?.status==='PASS'&&typeof s.checks[key].observation==='string'&&s.checks[key].observation.trim(),'missing or unresolved '+EIGHT_NAMES[i]+'.'+key);
+  const nested=v=>{if(!v||typeof v!=='object')return;if(Object.hasOwn(v,'status'))need(v.status==='PASS','unresolved nested observation');Object.values(v).forEach(nested);};nested(s.checks);
+  [s.input,s.output,s.reference,s.palette,...(s.evidence??[])].forEach(asset);need(s.evidence?.length,'comparison evidence missing');
+  if(i)need(s.input.sha256===stages[i-1].output.sha256&&s.reference.sha256===stages[0].reference.sha256&&s.palette.sha256===stages[0].palette.sha256,'source lineage or palette changed');
+  if(i===0)need(s.input.sha256===s.reference.sha256&&s.output.sha256===s.input.sha256,'analysis cannot edit the reference');
+  if([2,3,4,6,7].includes(i))need(s.input.sha256===s.output.sha256,'observation/review/save cannot alter artwork');
+  if(i>=4)need(JSON.stringify(s.grid)===JSON.stringify(stages[3].grid),'selected grid changed');
+ }
+ if(expected.prefix){need(expected.prefix.version===4&&expected.prefix.stages.length<=through,'invalid earlier-stage snapshot');expected.prefix.stages.forEach((s,i)=>need(JSON.stringify(s)===JSON.stringify(stages[i]),'earlier-stage review changed'));}
+ if(through<5)return {status:'PASS',through,next:through+1,visualTruth:'NOT_AUTOMATICALLY_DETERMINED'};
+ const layout=stages[4];for(const key of LAYOUT_CHECKS)need(layout.checks?.[key]?.status==='PASS'&&layout.checks[key].observation,'unresolved layout check '+key);
+ asset(layout.layout);const proof=JSON.parse(fs.readFileSync(layout.layout.path));
+ const {PNG}=require(require.resolve('pngjs',{paths:[__dirname,process.cwd()]}));
+ const src=PNG.sync.read(fs.readFileSync(stages[1].output.path)),pal=require('./build-palette-native.cjs').parsePalette(JSON.parse(fs.readFileSync(layout.palette.path)));
+ const replay=require('./source-line-layout.cjs').evidence(PNG,src,pal,layout.executionOptions);
+ need(JSON.stringify(proof)===JSON.stringify(replay),'layout evidence differs from executed source plan');
+ const make=(s,n,patch={})=>({...s,stage:n,name:SEVEN_NAMES[n-1],grid:stages[3].grid,...patch});
+ const projected=[make(stages[0],1,{output:stages[1].output}),make(stages[3],2),make(stages[1],3,{input:stages[1].output}),make(stages[2],4,{executionOptions:layout.executionOptions})];
+ if(through>=6)projected.push(make(stages[5],5));
+ if(through>=7){projected.push(make(stages[6],6,{action:'unchanged'}));projected.push(make(stages[6],7));}
+ const {prefix,...rest}=expected;
+ const result=assertStages({version:3,stages:projected},through>=7?7:through>=6?5:4,rest);
+ if(through===8){need(stages[7].checks?.savedReadback?.status==='PASS'&&stages[7].checks?.immutableCopy?.status==='PASS','saved PNG checks missing');}
+ return {...result,through,next:through===8?null:through+1};
+}
+function assertSavedStage(ledger,reviewed){
+ const need=(v,m)=>{if(!v)throw Error('Saved-stage gate: '+m);};
+ need(ledger?.version===4&&reviewed?.version===4&&ledger.stages?.length===8&&reviewed.stages?.length===7,'eight saved stages and locked seven-stage review required');
+ need(JSON.stringify(ledger.stages.slice(0,7))===JSON.stringify(reviewed.stages),'locked review prefix changed');
+ const s=ledger.stages[7],previous=reviewed.stages[6];
+ need(s.stage===8&&s.name==='saved-verification'&&s.status==='PASS'&&s.reviewer&&s.input.sha256===previous.output.sha256&&s.output.sha256===s.input.sha256,'saved image differs from locked review');
+ for(const k of ['reference','palette','grid'])need(JSON.stringify(s[k])===JSON.stringify(previous[k]),'saved '+k+' changed');
+ for(const k of EIGHT_CHECKS[7])need(s.checks?.[k]?.status==='PASS'&&s.checks[k].observation,'saved check missing: '+k);
+ need(s.evidence?.length,'saved readback evidence missing');for(const a of [s.input,s.output,...s.evidence])need(path.isAbsolute(a.path??'')&&hash(fs.readFileSync(a.path))===a.sha256,'Changed artifact');
+ return {status:'PASS',through:8,next:null,scope:'Locked prefix and unchanged saved artifacts; no conversion or layout rerun.'};
 }
 function assertCapacitySelection(stage,first,asset,fail){
  const s=stage.selection,n=2,text=v=>typeof v==='string'&&v.trim().length>0;
@@ -201,7 +250,7 @@ function assertCapacitySelection(stage,first,asset,fail){
  const chosen=s.candidates.find(c=>c.id===s.selectedId);
  need(chosen?.status==='PASS'&&JSON.stringify(stable(chosen.grid))===JSON.stringify(stable(stage.grid)),'selected grid must pass and match the locked grid');
 }
-module.exports={assertStages,assertProductionStages,assertExecution,executionOptions,CHECKS,SIX_CHECKS,SIX_NAMES,CAPACITY_CHECKS,DETAIL_CHECKS,detailChecksForStage,names,SEVEN_NAMES,SEVEN_CHECKS,ASSIGNMENT_CHECKS};
+module.exports={assertSavedStage,EIGHT_CHECKS,EIGHT_NAMES,LAYOUT_CHECKS,assertStages,assertProductionStages,assertExecution,executionOptions,CHECKS,SIX_CHECKS,SIX_NAMES,CAPACITY_CHECKS,DETAIL_CHECKS,detailChecksForStage,names,SEVEN_NAMES,SEVEN_CHECKS,ASSIGNMENT_CHECKS};
 if(require.main===module){try{
  const result=assertStages(JSON.parse(fs.readFileSync(process.argv[2])),Number(process.argv[3]));console.log(JSON.stringify(result));
 }catch(e){console.log(JSON.stringify({status:e.status??'UNVERIFIED',stage:e.stage??null,error:e.message}));process.exitCode=1;}}

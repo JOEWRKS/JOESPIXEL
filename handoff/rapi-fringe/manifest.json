@@ -1,0 +1,38 @@
+{
+  "version": 1,
+  "case": "same-source Rapi fringe, scoped correction",
+  "beforeStatus": "UNAPPROVED_COMPARISON_CANDIDATE",
+  "afterStatus": "SCOPED_CORRECTION_READY_FOR_USER_REVIEW",
+  "grid": {
+    "cell": 8,
+    "native": [
+      128,
+      192
+    ],
+    "canvas": [
+      1024,
+      1536
+    ]
+  },
+  "originalHashes": {
+    "source-material-8.json": "95e95e4c856423e201d64a0074e4d896a136b7774b2bef7871bece0290ad2440",
+    "source-policies.json": "8458be55e65afbdd1fafd583b4daec3e0f97bc84cc071f0db921db40ea43bb64",
+    "prior-executed-run.json": "9bf1484bc4c59f79b24d06ebbea5cb174249a147870564559efae0a3640dd29d",
+    "final-verification.json": "7cd8c83da0350487517aa0c4cca1824002b4c1ad03210ca9841e61d92a91017e"
+  },
+  "files": {
+    "after.display.png": "d81e0caf940283ec9731f735605182c09324f67ad5e6317ca71bc8db80874fe1",
+    "after.native.png": "ae1ee51aaf847f05520bb98828cfa48257a57557089d29a203cd69323dbc9a5c",
+    "before.display.png": "870913fe2f003aea213bdea0327b082c9f9c4216da2bdff72b0f2470482eae3d",
+    "before.native.png": "1f5b3df0d88a1a84e767a93fc8f44e5c8bef434e8199f996cc8559310a117c78",
+    "face-comparison.png": "2becde5d10823cb7c8297dda3e8d2208aae3bf3263e1060f5501474b770d2259",
+    "inputs.json.gz": "4daf7ea9c0fe544e5496a7e2dc957fe34d73ee7709ee386933f54c371f44531b",
+    "local-capacity.json": "aee8103bcd7b94d8272520e0caca9ccac0b24839d153b64eb34b3f43f2e8e4d7",
+    "palette.json": "4370bb36f1d2ee4ddccb2fa3ee0bb30a200f740e4f40906af12381bdd1855926",
+    "recorded-verification.json": "da22c523ee358dc91de38595e52e9df45920dbf1ff34a972673abac9482ebad3",
+    "source.png": "9db45563fb8ce5ca6573c2ad5abc953b184c46654c193dedba47e13957b0af42",
+    "tests-recorded.txt": "fa92747c14310130eb23b3b36632f5f85047b046103fa567c078341ef461fa9a",
+    "trace-analysis.json": "7189dcc4872a4838eb89774e2c70197bd19805520b017ef0bbfe9f52516048d1",
+    "whole-comparison.png": "97763ec33329254c97780c161b52df418d9b2bd02ce6d0128f27f6af692acb54"
+  }
+}

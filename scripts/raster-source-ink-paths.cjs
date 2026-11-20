@@ -334,7 +334,7 @@ function interiorAnchoredBand(mask,w,h){
  const topology=strokeTopology(band,w,h);if(topology.components!==1||topology.holes!==1)throw Error('Interior-anchored source band changes its connections');
  return {band,inside,report:{method:'observed-interior-band',sourceWidth,minimumWidth:widths[0],maximumWidth:widths.at(-1),sourcePixels:mask.size,centerlineBandPixels:band.size}};
 }
-function planSourceStroke(mask,sw,sh,grid,w,h,{closed=false,anchor}={}){
+function planSourceStroke(mask,sw,sh,grid,w,h,{closed=false,anchor,allowCompactMark=false}={}){
  if(anchor!==undefined&&(anchor!=='interior'||!closed))throw Error('Interior anchor requires an observed closed stroke');
  if(!mask.size)throw Error('Source stroke has no observed pigment');
  const locate=(axis,v)=>{const a=grid[axis];let i=a.findIndex(([lo,hi])=>v>=lo&&v<hi);if(i<0)throw Error('Source stroke outside grid');return i+(v-a[i][0])/(a[i][1]-a[i][0]);};
@@ -359,6 +359,13 @@ function planSourceStroke(mask,sw,sh,grid,w,h,{closed=false,anchor}={}){
  }
  cells=new Set(thinMask(cells,w));cells=coalesceStrokeJunctions(cells,paths,w,h,new Set()).cells;
  const footprint=new Set();for(const p of mask)footprint.add(Math.floor(locate('y',Math.floor(p/sw)+.5))*w+Math.floor(locate('x',p%sw+.5)));
+ // An explicitly observed compact detail can have no segment after tracing:
+ // all its samples are inside one cell. Preserve that one occupied cell only.
+ // Ordinary contours, closed rings and required landmark curves do not opt in.
+ if(allowCompactMark&&!closed&&!anchor&&!cells.size&&footprint.size===1){
+  const topology=strokeTopology(mask,sw,sh);
+  if(topology.components===1&&topology.holes===0)cells=new Set(footprint);
+ }
  if(anchored){
   // Allocate the enclosed face and its one-cell outer rim together. The
   // medial axis of attached ink is not the boundary of the observed face.

@@ -1,6 +1,6 @@
 {
   "name": "joespixel",
-  "version": "2.25.0-single-grid.2",
+  "version": "2.26.0-eight-stage.1",
   "private": true,
   "description": "JOESPIXEL pixel-art skill and fixed-grid verification workflow",
   "engines": {

@@ -21,7 +21,7 @@ function checkArtifact(a) {
   need(hash(fs.readFileSync(a.path)) === a.sha256, 'Changed artifact: '+a.path);
 }
 function sourceGate(contract, PNG) {
-  need(!contract.redesign && !contract.measuredConversion && !contract.mode, 'Retired conversion route; create a fresh seven-stage fixed-grid run');
+  need(!contract.redesign && !contract.measuredConversion && !contract.mode, 'Retired conversion route; create a fresh eight-stage fixed-grid run');
   require('./stage-gates.cjs').assertProductionStages(contract.stageChecks,2,{pixelSourceSha256:contract.source?.sha256,paletteSha256:contract.palette?.sha256,grid:{canvas:[contract.width*contract.scale,contract.height*contract.scale],cell:contract.scale,native:[contract.width,contract.height],origin:[0,0]}});
   need(contract.stageChecks?.stages?.[0]?.execution?.sampling === 'source-region-area', 'Production requires source-region-area');
   require('./eye-plane-policy.cjs').assertEyePolicy(contract.eyePolicy,parsePalette(read(contract.palette.path)));
@@ -38,7 +38,7 @@ function sourceGate(contract, PNG) {
     typeof s.observation==='string' && s.observation.trim(), 'Source assessment missing, stale or not ready');
   need(s.representation==='illustration',
     'Single-grid production requires a non-pixel illustration; approximate pixel art must not be rasterized again. Preserve native-grid assets through their original export path.');
-  need(contract.stageChecks.stages[0].output.sha256===contract.source.sha256,
+  need(contract.stageChecks.stages[1].output.sha256===contract.source.sha256,
     'Single-grid capacity and assignment must observe the same illustration; a regenerated source requires fresh capacity evidence');
   const fixed=require('./build-palette-native.cjs').assertFixedGridPlacement(contract,PNG.sync.read(fs.readFileSync(contract.source.path)));
   need(fixed, 'Production requires an explicit locked fixed-asset-grid mapping');
@@ -65,6 +65,9 @@ function prepare(jobPath, outputDir, PNG) {
   const trace=require('./conversion-trace.cjs').createTrace(path.join(outputDir,'diagnostics'),{contract:artifact(job.contract),job:artifact(jobPath),source:contract.source,palette:contract.palette,materialPlan:contract.materialPlan??null,grid:contract.gridPlacement,converters:converters()});
   let built;try{
     built=buildNative(...args,job.sampling??'area-vote',null,null,job.structure??null,contract.eyePolicy,contract.formPolicy??null,contract.outlinePolicy??null,contract.materialPlan??null,trace.record);
+    const planned=read(contract.stageChecks.stages[4].layout.path).layouts;
+    const executed=(built.outlineReport?.surfaceLayout??[]).filter(s=>s.jointLayout).map(s=>s.jointLayout);
+    need(JSON.stringify(executed)===JSON.stringify(planned),'Rendered line-plane allocation differs from the reviewed stage 5 plan');
     trace.finish('CONVERSION_COMPLETED_REQUIRES_VISUAL_REVIEW');
   }catch(error){trace.finish('CONVERSION_FAILED',error.message);throw error;}
   const {fit}=built, map=contract.sourceToNative;
@@ -171,6 +174,9 @@ function finalize(runDir,reviewPath,PNG) {
     run:locked.run,review:locked.review,gate:locked.gate,gridLock:artifact(lockPath),
     draftPreservation:{status:'PASS',changedNativePixels:0,changedDisplayPixels:0,mode:'byte-copy-only',strokeAudit},
     native:artifact(nativePath),expanded:artifact(expandedPath)};
+  const reviewed=read(locked.review.path).stageChecks,previous=reviewed.stages[6];
+  receipt.stageChecks={version:4,stages:[...reviewed.stages.slice(0,7),{...previous,stage:8,name:'saved-verification',input:locked.native,output:receipt.native,evidence:[receipt.native,receipt.expanded],reviewer:'immutable saved-raster verifier',checks:{savedReadback:{status:'PASS',observation:'Read saved PNGs and compared all native and expanded pixel bytes.'},immutableCopy:{status:'PASS',observation:'Export copied the locked files without invoking conversion.'}}}]};
+  require('./stage-gates.cjs').assertSavedStage(receipt.stageChecks,reviewed);
   write(path.join(delivery,'receipt.json'),receipt);
   return{status:receipt.status,exported:true,receipt:path.join(delivery,'receipt.json'),native:nativePath,expanded:expandedPath};
 }
@@ -178,6 +184,7 @@ function verify(runDir,PNG) {
   const receipt=read(path.join(runDir,'delivery','receipt.json'));
   for(const a of [receipt.run,receipt.review,receipt.gate,receipt.gridLock,receipt.native,receipt.expanded])checkArtifact(a);
   const {locked,lockPath,native,expanded,strokeAudit}=readLockedDraft(runDir,PNG);
+  require('./stage-gates.cjs').assertSavedStage(receipt.stageChecks,read(locked.review.path).stageChecks);
   need(path.resolve(receipt.gridLock.path)===path.resolve(lockPath),'Receipt references a different grid lock');
   for(const k of ['run','review','gate','native','expanded'])need(receipt[k].sha256===locked[k].sha256,'Delivery differs from locked '+k);
   need(PNG.sync.read(fs.readFileSync(receipt.native.path)).data.equals(native.data) && PNG.sync.read(fs.readFileSync(receipt.expanded.path)).data.equals(expanded.data),'Delivery raster differs from locked draft');

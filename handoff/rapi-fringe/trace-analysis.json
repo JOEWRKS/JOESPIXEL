@@ -1,0 +1,954 @@
+{
+  "rect": [
+    448,
+    112,
+    120,
+    80
+  ],
+  "rows": [
+    {
+      "y": 128,
+      "rawBlack": [
+        [
+          460,
+          460,
+          1
+        ],
+        [
+          546,
+          550,
+          5
+        ]
+      ],
+      "assignedBlack": [
+        [
+          460,
+          460,
+          1
+        ],
+        [
+          546,
+          550,
+          5
+        ]
+      ],
+      "savedBlack": [
+        [
+          456,
+          463,
+          8
+        ],
+        [
+          544,
+          551,
+          8
+        ]
+      ]
+    },
+    {
+      "y": 144,
+      "rawBlack": [
+        [
+          457,
+          457,
+          1
+        ],
+        [
+          473,
+          473,
+          1
+        ],
+        [
+          518,
+          519,
+          2
+        ],
+        [
+          541,
+          541,
+          1
+        ],
+        [
+          547,
+          548,
+          2
+        ],
+        [
+          557,
+          558,
+          2
+        ]
+      ],
+      "assignedBlack": [
+        [
+          457,
+          457,
+          1
+        ],
+        [
+          473,
+          473,
+          1
+        ],
+        [
+          518,
+          519,
+          2
+        ],
+        [
+          541,
+          541,
+          1
+        ],
+        [
+          547,
+          548,
+          2
+        ],
+        [
+          557,
+          558,
+          2
+        ]
+      ],
+      "savedBlack": [
+        [
+          456,
+          463,
+          8
+        ],
+        [
+          472,
+          479,
+          8
+        ],
+        [
+          488,
+          495,
+          8
+        ],
+        [
+          512,
+          519,
+          8
+        ],
+        [
+          544,
+          567,
+          24
+        ]
+      ]
+    },
+    {
+      "y": 152,
+      "rawBlack": [
+        [
+          456,
+          456,
+          1
+        ],
+        [
+          472,
+          472,
+          1
+        ],
+        [
+          492,
+          492,
+          1
+        ],
+        [
+          516,
+          516,
+          1
+        ],
+        [
+          519,
+          519,
+          1
+        ],
+        [
+          540,
+          541,
+          2
+        ],
+        [
+          547,
+          547,
+          1
+        ],
+        [
+          560,
+          561,
+          2
+        ],
+        [
+          566,
+          567,
+          2
+        ]
+      ],
+      "assignedBlack": [
+        [
+          456,
+          456,
+          1
+        ],
+        [
+          471,
+          472,
+          2
+        ],
+        [
+          492,
+          492,
+          1
+        ],
+        [
+          516,
+          517,
+          2
+        ],
+        [
+          519,
+          519,
+          1
+        ],
+        [
+          540,
+          541,
+          2
+        ],
+        [
+          547,
+          548,
+          2
+        ],
+        [
+          560,
+          561,
+          2
+        ],
+        [
+          566,
+          567,
+          2
+        ]
+      ],
+      "savedBlack": [
+        [
+          456,
+          471,
+          16
+        ],
+        [
+          488,
+          495,
+          8
+        ],
+        [
+          512,
+          519,
+          8
+        ],
+        [
+          544,
+          551,
+          8
+        ],
+        [
+          560,
+          567,
+          8
+        ]
+      ]
+    },
+    {
+      "y": 160,
+      "rawBlack": [
+        [
+          456,
+          456,
+          1
+        ],
+        [
+          470,
+          471,
+          2
+        ],
+        [
+          490,
+          490,
+          1
+        ],
+        [
+          513,
+          513,
+          1
+        ],
+        [
+          519,
+          519,
+          1
+        ],
+        [
+          537,
+          538,
+          2
+        ],
+        [
+          541,
+          541,
+          1
+        ],
+        [
+          546,
+          546,
+          1
+        ],
+        [
+          562,
+          563,
+          2
+        ],
+        [
+          566,
+          567,
+          2
+        ]
+      ],
+      "assignedBlack": [
+        [
+          456,
+          456,
+          1
+        ],
+        [
+          470,
+          471,
+          2
+        ],
+        [
+          490,
+          490,
+          1
+        ],
+        [
+          513,
+          514,
+          2
+        ],
+        [
+          519,
+          519,
+          1
+        ],
+        [
+          537,
+          538,
+          2
+        ],
+        [
+          541,
+          541,
+          1
+        ],
+        [
+          546,
+          546,
+          1
+        ],
+        [
+          562,
+          563,
+          2
+        ],
+        [
+          566,
+          567,
+          2
+        ]
+      ],
+      "savedBlack": [
+        [
+          448,
+          455,
+          8
+        ],
+        [
+          464,
+          471,
+          8
+        ],
+        [
+          480,
+          487,
+          8
+        ],
+        [
+          512,
+          519,
+          8
+        ],
+        [
+          536,
+          567,
+          32
+        ]
+      ]
+    },
+    {
+      "y": 168,
+      "rawBlack": [
+        [
+          456,
+          457,
+          2
+        ],
+        [
+          468,
+          470,
+          3
+        ],
+        [
+          487,
+          487,
+          1
+        ],
+        [
+          509,
+          510,
+          2
+        ],
+        [
+          517,
+          518,
+          2
+        ],
+        [
+          534,
+          535,
+          2
+        ],
+        [
+          540,
+          540,
+          1
+        ],
+        [
+          543,
+          543,
+          1
+        ],
+        [
+          547,
+          553,
+          7
+        ],
+        [
+          564,
+          564,
+          1
+        ],
+        [
+          566,
+          566,
+          1
+        ]
+      ],
+      "assignedBlack": [
+        [
+          456,
+          457,
+          2
+        ],
+        [
+          468,
+          470,
+          3
+        ],
+        [
+          486,
+          487,
+          2
+        ],
+        [
+          509,
+          510,
+          2
+        ],
+        [
+          517,
+          518,
+          2
+        ],
+        [
+          534,
+          535,
+          2
+        ],
+        [
+          540,
+          540,
+          1
+        ],
+        [
+          543,
+          543,
+          1
+        ],
+        [
+          547,
+          553,
+          7
+        ],
+        [
+          564,
+          564,
+          1
+        ],
+        [
+          566,
+          566,
+          1
+        ]
+      ],
+      "savedBlack": [
+        [
+          456,
+          471,
+          16
+        ],
+        [
+          480,
+          487,
+          8
+        ],
+        [
+          504,
+          519,
+          16
+        ],
+        [
+          528,
+          543,
+          16
+        ]
+      ]
+    },
+    {
+      "y": 176,
+      "rawBlack": [
+        [
+          457,
+          458,
+          2
+        ],
+        [
+          467,
+          468,
+          2
+        ],
+        [
+          482,
+          484,
+          3
+        ],
+        [
+          504,
+          505,
+          2
+        ],
+        [
+          516,
+          516,
+          1
+        ],
+        [
+          526,
+          526,
+          1
+        ],
+        [
+          530,
+          530,
+          1
+        ],
+        [
+          534,
+          538,
+          5
+        ],
+        [
+          540,
+          540,
+          1
+        ],
+        [
+          552,
+          552,
+          1
+        ],
+        [
+          560,
+          567,
+          8
+        ]
+      ],
+      "assignedBlack": [
+        [
+          457,
+          458,
+          2
+        ],
+        [
+          467,
+          468,
+          2
+        ],
+        [
+          482,
+          485,
+          4
+        ],
+        [
+          503,
+          505,
+          3
+        ],
+        [
+          516,
+          516,
+          1
+        ],
+        [
+          526,
+          526,
+          1
+        ],
+        [
+          529,
+          531,
+          3
+        ],
+        [
+          534,
+          538,
+          5
+        ],
+        [
+          540,
+          541,
+          2
+        ],
+        [
+          552,
+          553,
+          2
+        ]
+      ],
+      "savedBlack": [
+        [
+          464,
+          487,
+          24
+        ],
+        [
+          496,
+          503,
+          8
+        ],
+        [
+          512,
+          527,
+          16
+        ],
+        [
+          552,
+          567,
+          16
+        ]
+      ]
+    },
+    {
+      "y": 184,
+      "rawBlack": [
+        [
+          458,
+          459,
+          2
+        ],
+        [
+          465,
+          466,
+          2
+        ],
+        [
+          477,
+          478,
+          2
+        ],
+        [
+          481,
+          481,
+          1
+        ],
+        [
+          497,
+          498,
+          2
+        ],
+        [
+          513,
+          513,
+          1
+        ],
+        [
+          520,
+          520,
+          1
+        ],
+        [
+          523,
+          524,
+          2
+        ],
+        [
+          534,
+          535,
+          2
+        ],
+        [
+          541,
+          541,
+          1
+        ],
+        [
+          546,
+          555,
+          10
+        ],
+        [
+          566,
+          567,
+          2
+        ]
+      ],
+      "assignedBlack": [
+        [
+          458,
+          459,
+          2
+        ],
+        [
+          465,
+          466,
+          2
+        ],
+        [
+          477,
+          478,
+          2
+        ],
+        [
+          481,
+          481,
+          1
+        ],
+        [
+          497,
+          498,
+          2
+        ],
+        [
+          513,
+          513,
+          1
+        ],
+        [
+          520,
+          520,
+          1
+        ],
+        [
+          523,
+          524,
+          2
+        ],
+        [
+          534,
+          535,
+          2
+        ],
+        [
+          541,
+          541,
+          1
+        ]
+      ],
+      "savedBlack": [
+        [
+          456,
+          463,
+          8
+        ],
+        [
+          480,
+          519,
+          40
+        ],
+        [
+          536,
+          551,
+          16
+        ]
+      ]
+    }
+  ],
+  "changes": [
+    {
+      "stage": "02-area-placement",
+      "blackCells": 25,
+      "changedFromPrevious": null,
+      "black2x2": 0
+    },
+    {
+      "stage": "03-required-forms",
+      "blackCells": 25,
+      "changedFromPrevious": 0,
+      "black2x2": 0
+    },
+    {
+      "stage": "05-eye-placement",
+      "blackCells": 24,
+      "changedFromPrevious": 4,
+      "black2x2": 0
+    },
+    {
+      "stage": "12-outline-reference-rendered",
+      "blackCells": 55,
+      "changedFromPrevious": 42,
+      "black2x2": 0
+    },
+    {
+      "stage": "17-outline-curve-rendered",
+      "blackCells": 55,
+      "changedFromPrevious": 0,
+      "black2x2": 0
+    },
+    {
+      "stage": "19-material-audit",
+      "blackCells": 55,
+      "changedFromPrevious": 0,
+      "black2x2": 0
+    }
+  ],
+  "sourceInkRoles": [
+    {
+      "name": "observed charcoal ink",
+      "kind": "mixed",
+      "color": "#24242D",
+      "paletteColors": [
+        "#24242D"
+      ],
+      "observation": "Thin dark smooth source contour with broad dark garment planes, kept as mixed ink.",
+      "family": "observed-ink-network"
+    }
+  ],
+  "forms": [
+    "small neutral closed mouth",
+    "compact nose indication"
+  ],
+  "surface": [],
+  "curve": {},
+  "exteriorReplacement": {
+    "selection": "complete-source-ownership",
+    "sourceMedialSamples": 7437,
+    "ownedCells": 2428,
+    "regionSidesResolvedBeforeInk": true,
+    "contactJoins": [],
+    "regionTopology": {
+      "reference": {
+        "connectivity": "c672305c833bdc6d171abfc53d15695ecfff7029966640107b092658e20ddf6a",
+        "closedGaps": "e40c97d8843612c418d40b4ea2d192294f60d2f3d339276b503ca97d5d818afb"
+      },
+      "proposed": {
+        "connectivity": "c672305c833bdc6d171abfc53d15695ecfff7029966640107b092658e20ddf6a",
+        "closedGaps": "e40c97d8843612c418d40b4ea2d192294f60d2f3d339276b503ca97d5d818afb"
+      },
+      "unchanged": true
+    }
+  },
+  "savedWidth": {
+    "status": "PASS",
+    "sourceExteriorChecked": true,
+    "changedSourceExteriorPixels": 0,
+    "changedImmutablePixels": 0,
+    "renderedStrokeChecked": true,
+    "exteriorClosureChecked": true,
+    "exposedMaterialPixels": 0,
+    "outsideDeclaredBandPixels": 0,
+    "missingPathPixels": 0,
+    "residualBandInk": 0,
+    "solidRenderedStrokeBlocks": 0,
+    "changedFillPixels": 0,
+    "changedProtectedPixels": 0,
+    "checkedSourcePaths": 5095,
+    "checkedBandCells": 8977,
+    "sourceSupportedFillCells": 138,
+    "locations": {
+      "sourceExterior": [],
+      "missing": [],
+      "residual": [],
+      "exposedMaterial": [],
+      "blocks": []
+    },
+    "scope": "Declared whole source stroke bands; broad source fill and locked features retain distinct ownership. Visual source completeness remains a separate review."
+  },
+  "isolatedBangRegion": {
+    "rect": [
+      448,
+      112,
+      88,
+      80
+    ],
+    "changes": [
+      {
+        "name": "02-area-placement",
+        "black": 9,
+        "changed": null,
+        "blocks": 0
+      },
+      {
+        "name": "03-required-forms",
+        "black": 9,
+        "changed": 0,
+        "blocks": 0
+      },
+      {
+        "name": "05-eye-placement",
+        "black": 9,
+        "changed": 0,
+        "blocks": 0
+      },
+      {
+        "name": "12-outline-reference-rendered",
+        "black": 36,
+        "changed": 30,
+        "blocks": 0
+      },
+      {
+        "name": "17-outline-curve-rendered",
+        "black": 36,
+        "changed": 0,
+        "blocks": 0
+      },
+      {
+        "name": "19-material-audit",
+        "black": 36,
+        "changed": 0,
+        "blocks": 0
+      }
+    ]
+  }
+}

@@ -68,6 +68,16 @@ test('source partitions keep dark iris pigment out of the lid and pool iris tone
  const base=buildNative(PNG,s,pal,6,6,'#FFFFFF','area-vote').image,g=affineEyeGrid(s,base,{fitWidth:6,fitHeight:6,offsetX:0,offsetY:0});
  assert.equal(base.data.readUInt32BE((2*6+2)*4),0x101010ff);
  const a=applyEyePolicy(PNG,s,base,pal,p,g);assert.notEqual(a.image.data.readUInt32BE((2*6+2)*4),0x101010ff);
+ const witnessed=structuredClone(p);
+ witnessed.eyes[0].roles[0].samplePoints=[[8,11]];
+ witnessed.eyes[0].roles[3].samplePoints=[inside[9]];
+ witnessed.eyes[0].roles[0].verifySampleOwnership=true;
+ witnessed.eyes[0].roles[3].verifySampleOwnership=true;
+ assert.deepEqual(applyEyePolicy(PNG,s,base,pal,witnessed,g).image.data,a.image.data,'semantic sample checks cannot change a valid layout, including equal pigments with different owners');
+ const excluded=structuredClone(witnessed);
+ excluded.eyes[0].baseRoles.push('iris-dark');
+ excluded.eyes[0].partitions[0].roles=['iris'];
+ assert.throws(()=>applyEyePolicy(PNG,s,base,pal,excluded,g),/source sample assigned to another role/,'a source partition cannot silently turn its observed dark sample red');
  assert.equal(a.sourceRoleMap.data.readUInt32BE((inside[9][1]*24+inside[9][0])*4),0x601010ff);
  assert.equal(a.sourceRoleMap.data.readUInt32BE((11*24+8)*4),0x101010ff);
  const own=ep.eyeOwnership(s,p,6,6);for(let q=0;q<36;q++)if(!own.cells.has(q))assert.equal(a.image.data.readUInt32BE(q*4),base.data.readUInt32BE(q*4));
@@ -209,5 +219,45 @@ test('attached same-pigment mark cannot pull an interior-anchored closed eye awa
  const missing=structuredClone(p);delete missing.eyes[0].roles[0].interiorRoles;assert.throws(()=>assertEyePolicy(missing,pal),/interior anchor/);
  const remapped=require('./eye-plane-policy.cjs').remapEyePolicy(p,grid);assert.deepEqual(remapped.eyes[0].roles[0].attachedFill.sourcePolygon,[[0,0],[20,0],[20,7.5],[0,7.5]]);assertEyePolicy(remapped,pal);assert.equal(p.eyes[0].roles[0].attachedFill.sourcePolygon[1][0],80,'remap must not mutate source observations');
  const painted=structuredClone(p);painted.eyes[0].roles[0].attachedFill.nativeCells=[1];assert.throws(()=>assertEyePolicy(painted,pal),/observed same-pigment/);
+});
+test('a pupil straddling a grid edge stays below the planned eyelid rather than replacing it',()=>{
+ const s=new PNG({width:64,height:40});s.data.fill(255);
+ for(let y=8;y<11;y++)for(let x=8;x<48;x++)s.data.writeUInt32BE(0x101010ff,(y*64+x)*4);
+ for(let y=11;y<24;y++)for(let x=8;x<48;x++)s.data.writeUInt32BE(0xcc2020ff,(y*64+x)*4);
+ for(let y=13;y<19;y++)for(let x=24;x<30;x++)if(y!==18||(x!==24&&x!==29))s.data.writeUInt32BE(0x601010ff,(y*64+x)*4);
+ const pal=parsePalette({colors:['#FFFFFF','#101010','#CC2020','#601010']}),shape=[[4,4],[52,4],[52,32],[4,32]],part=(name,rect,roles)=>({name,sourcePolygon:[[rect[0],rect[1]],[rect[2],rect[1]],[rect[2],rect[3]],[rect[0],rect[3]]],roles,observation:'Observed source plane; no native coordinates.'});
+ const p={version:1,visibility:'visible',placement:'source-partitions',geometryPolicy:'source-stroke-fill',observation:'Thin eyelid and pupil just across an 8px quantization edge.',eyes:[{name:'eye',rect:[4,4,48,28],sourcePolygon:shape,reflection:'off',baseRoles:['lid','white'],roles:[
+  {name:'lid',family:'lid',geometry:'stroke',width:1,color:'#101010',colors:['#101010'],samples:[[16,16,16]]},
+  {name:'white',family:'white',geometry:'fill',color:'#FFFFFF',colors:['#FFFFFF'],samples:[[255,255,255]],required:false},
+  {name:'iris',family:'iris',geometry:'fill',color:'#CC2020',colors:['#CC2020'],samples:[[204,32,32]]},
+  {name:'pupil',family:'iris',geometry:'fill',shape:'source-oval',protect:true,color:'#601010',colors:['#601010'],samples:[[96,16,16]]}
+ ],partitions:[part('top',[8,11,48,13],['iris']),part('bottom',[8,19,48,24],['iris']),part('left',[8,13,24,19],['iris']),part('right',[30,13,48,19],['iris']),part('pupil',[24,13,30,19],['iris','pupil'])]}]};
+ const base=buildNative(PNG,s,pal,8,5,'#FFFFFF','area-vote').image,g=affineEyeGrid(s,base,{fitWidth:8,fitHeight:5,offsetX:0,offsetY:0}),a=applyEyePolicy(PNG,s,base,pal,p,g),e=a.report.eyes[0],oval=e.fillShapes[0],lid=new Set(e.geometry.strokes[0].cells);
+ assert.equal(oval.placement,'source-supported-beside-stroke');assert.deepEqual(oval.nativeExtent,[1,1]);
+ assert(oval.centerDisplacementCells>.51&&oval.centerDisplacementCells<1);assert(oval.cells.every(q=>!lid.has(q)));
+ for(const q of lid)assert.equal(a.image.data.readUInt32BE(q*4),0x101010ff);
+ assert.equal(Math.floor(oval.cells[0]/8),2,'pupil remains on the source-supported lower side of the eyelid');
+ const noStroke=structuredClone(p);noStroke.eyes[0].roles[0].geometry='fill';noStroke.eyes[0].roles[0].required=false;delete noStroke.eyes[0].roles[0].width;
+ const ordinary=applyEyePolicy(PNG,s,base,pal,noStroke,g);assert.equal(ordinary.report.eyes[0].fillShapes[0].placement,'nearest-source-center','ordinary unblocked placements keep the previous centroid behavior');
+ assert.equal(auditEyePolicy(PNG,s,a.image,pal,p,g).status,'PASS');
+});
+test('a rounded iris keeps its area below the lid without consuming sclera or growing its pupil',()=>{
+ const s=new PNG({width:64,height:48});s.data.fill(255);
+ for(let y=0;y<48;y++)for(let x=0;x<64;x++)if(((x+.5-28)/9)**2+((y+.5-20)/8)**2<=1)s.data.writeUInt32BE(0xcc2020ff,(y*64+x)*4);
+ for(let y=12;y<15;y++)for(let x=16;x<40;x++)s.data.writeUInt32BE(0x101010ff,(y*64+x)*4);
+ for(let y=18;y<23;y++)for(let x=25;x<30;x++)s.data.writeUInt32BE(0x601010ff,(y*64+x)*4);
+ const pal=parsePalette({colors:['#FFFFFF','#101010','#CC2020','#601010']}),polygon=[[8,8],[48,8],[48,40],[8,40]],roles=[
+  {name:'lid',family:'lid',geometry:'stroke',width:1,color:'#101010',colors:['#101010'],samples:[[16,16,16]]},
+  {name:'sclera',family:'white',geometry:'fill',color:'#FFFFFF',colors:['#FFFFFF'],samples:[[255,255,255]]},
+  {name:'iris',family:'iris',geometry:'fill',shape:'source-family-oval',protect:true,color:'#CC2020',colors:['#CC2020'],samples:[[204,32,32]]},
+  {name:'pupil',family:'iris',geometry:'fill',shape:'source-oval',protect:true,color:'#601010',colors:['#601010'],samples:[[96,16,16]]}
+ ];
+ const p={version:1,visibility:'visible',placement:'source-partitions',geometryPolicy:'source-stroke-fill',observation:'Small source iris crossing a coarse grid row.',eyes:[{name:'eye',rect:[8,8,40,32],sourcePolygon:polygon,reflection:'off',baseRoles:roles.map(r=>r.name),partitions:[{name:'source',sourcePolygon:polygon,roles:roles.map(r=>r.name),observation:'Distinct observed pigments.'}],roles}]};
+ const base=buildNative(PNG,s,pal,8,6,'#FFFFFF','area-vote').image,g=affineEyeGrid(s,base,{fitWidth:8,fitHeight:6,offsetX:0,offsetY:0}),a=applyEyePolicy(PNG,s,base,pal,p,g),eye=a.report.eyes[0],shape=eye.fillShapes.find(r=>r.role==='iris'),pupil=eye.fillShapes.find(r=>r.role==='pupil');
+ assert.deepEqual(shape.nativeExtent,[2,2]);assert.equal(shape.cells.length,4);assert.deepEqual(pupil.nativeExtent,[1,1]);assert(pupil.cells.every(q=>shape.cells.includes(q)));
+ assert(eye.roles.find(r=>r.name==='sclera').nativeCells>0);assert(shape.cells.every(q=>!eye.geometry.strokes[0].cells.includes(q)));
+ const previous=structuredClone(p);delete previous.eyes[0].roles[2].shape;delete previous.eyes[0].roles[2].protect;const old=applyEyePolicy(PNG,s,base,pal,previous,g);
+ assert(old.report.eyes[0].roles.filter(r=>r.family==='iris').reduce((n,r)=>n+r.nativeCells,0)<4,'reproduces iris loss from independent cell majority');
+ assert.equal(auditEyePolicy(PNG,s,a.image,pal,p,g).status,'PASS');assert.equal(a.image.data.readUInt32BE(0),0xffffffff);
 });
 console.log(n+' eye policy checks passed');

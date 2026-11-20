@@ -336,7 +336,7 @@ function allocateRequiredForms(PNG,source,baseline,grid,palette,policy,material=
   const clearVacated=keep=>{let count=0;for(const p of footprint)if(!keep.has(p)&&!reserved.has(p)){image.data.writeUInt32BE(bg,p*4);count++;}return count;};
   if(policy.placement==='source-path'){
    try{
-    const planner=require('./raster-source-ink-paths.cjs'),plan=f.curve?planner.planObservedCurve(new Set(main),source.width,source.height,grid,baseline.width,baseline.height,f.curve):planner.planSourceStroke(new Set(main),source.width,source.height,grid,baseline.width,baseline.height);
+    const planner=require('./raster-source-ink-paths.cjs'),plan=f.curve?planner.planObservedCurve(new Set(main),source.width,source.height,grid,baseline.width,baseline.height,f.curve):planner.planSourceStroke(new Set(main),source.width,source.height,grid,baseline.width,baseline.height,{allowCompactMark:f.priority==='optional'});
     if([...plan.cells].some(p=>reserved.has(p)&&reserved.get(p).color!==color))fail('required stroke owners compete for one cell');
     const fills=new Map(),component=new Set(main),nonInk=contextPool,contextPalette=[...new Map(context.map(lab=>{const color=nonInk.reduce((a,b)=>dist(toLab(a.rgb),lab)<=dist(toLab(b.rgb),lab)?a:b);return [color.hex,color];})).values()];
     const contextAt=q=>{

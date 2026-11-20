@@ -64,13 +64,13 @@ function ledger(){
  const s={...structuredClone(l.stages[2]),stage:4,name:'material-assignment',input:sourceAsset,output:sourceAsset,checks:Object.fromEntries(g.ASSIGNMENT_CHECKS.map(k=>[k,pass()])),executionOptions:options,assignment:{plan:artifact,map}};
  l.stages.splice(3,0,s);l.stages.forEach((s,i)=>{s.stage=i+1;s.name=g.SEVEN_NAMES[i];});return l;
 }
-test('seven-stage source map is bound to actual executable plan',()=>assert.equal(g.assertProductionStages(ledger(),5).through,7));
-test('six-stage records cannot start new production',()=>assert.throws(()=>g.assertProductionStages(fixtureSixLedger(sourceAsset,paletteAsset,sourceAsset,plan.grid),2),/Seven-stage/));
-test('missing material stage blocks conversion',()=>{const l=ledger();l.stages.splice(3,1);assert.throws(()=>g.assertProductionStages(l,2),/Stage 4/);});
-test('failed material observation cannot hide under parent PASS',()=>{const l=ledger();l.stages[3].checks.ambiguity.status='FAIL';assert.throws(()=>g.assertProductionStages(l,2),/ambiguity/);});
-test('forged source map is rejected',()=>{const l=ledger(),im=PNG.sync.read(fs.readFileSync(map.path));im.data.set([0,0,0,255],0);l.stages[3].assignment.map=asset('forged.png',PNG.sync.write(im));assert.throws(()=>g.assertProductionStages(l,2),/ownership map differs/);});
+test('historical seven-stage source map remains bound to its executable plan',()=>assert.equal(g.assertStages(ledger(),7).through,7));
+test('six-stage records cannot start new production',()=>assert.throws(()=>g.assertProductionStages(fixtureSixLedger(sourceAsset,paletteAsset,sourceAsset,plan.grid),2),/Eight-stage/));
+test('missing material stage blocks historical validation',()=>{const l=ledger();l.stages.splice(3,1);assert.throws(()=>g.assertStages(l,4),/Stage 4/);});
+test('failed material observation cannot hide under parent PASS',()=>{const l=ledger();l.stages[3].checks.ambiguity.status='FAIL';assert.throws(()=>g.assertStages(l,4),/ambiguity/);});
+test('forged source map is rejected',()=>{const l=ledger(),im=PNG.sync.read(fs.readFileSync(map.path));im.data.set([0,0,0,255],0);l.stages[3].assignment.map=asset('forged.png',PNG.sync.write(im));assert.throws(()=>g.assertStages(l,4),/ownership map differs/);});
 test('execution snapshot includes reviewed plan',()=>assert.equal(g.assertExecution(ledger(),'fixed-asset-grid',{width:6,height:6,scale:4,background:'#FFF7E6',materialPlan:artifact,sampling:'source-region-area'}).status,'MATCH'));
-test('overlapping eye and line windows require actual eye shape',()=>{const l=ledger(),o=l.stages[3].executionOptions;l.stages[0].execution.operations.push('eyePolicy','outlinePolicy');o.eyePolicy={eyes:[{rect:[4,4,12,12]}]};o.outlinePolicy={observedStrokes:{roles:[{rect:[8,4,12,12]}]}};assert.throws(()=>g.assertProductionStages(l,2),/actual eye ownership polygon/);});
+test('overlapping eye and line windows require actual eye shape',()=>{const l=ledger(),o=l.stages[3].executionOptions;l.stages[0].execution.operations.push('eyePolicy','outlinePolicy');o.eyePolicy={eyes:[{rect:[4,4,12,12]}]};o.outlinePolicy={observedStrokes:{roles:[{rect:[8,4,12,12]}]}};assert.throws(()=>g.assertStages(l,4),/actual eye ownership polygon/);});
 test('material protection cannot contradict the observed eye shape',()=>{const p=structuredClone(plan),o={...policies,eyePolicy:{eyes:[{rect:[4,4,8,8],sourcePolygon:[[4,4],[12,4],[12,12],[4,12]]}]}};p.boundaryPolicySha256=m.policyHash(o);assert.throws(()=>m.compile(PNG,source,palette,6,6,p,o),/eye and material ownership shapes differ/);});
 test('observed internal strokes reserve ink without exempting surrounding skin from its palette',()=>{
  const im=new PNG({width:48,height:48});for(let p=0;p<48*48;p++)im.data.writeUInt32BE(0xf9e6bfff,p*4);

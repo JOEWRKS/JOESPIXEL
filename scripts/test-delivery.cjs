@@ -1,5 +1,5 @@
 "use strict";
-// Seven-stage synthetic export fixtures. PASS here is not artwork approval.
+// Eight-stage synthetic export fixtures. PASS here is not artwork approval.
 const assert=require('node:assert/strict'),fs=require('node:fs'),os=require('node:os'),path=require('node:path'),crypto=require('node:crypto');
 const {PNG}=require(require.resolve('pngjs',{paths:[__dirname,process.cwd()]}));
 const b=require('./build-palette-native.cjs'),g=require('./stage-gates.cjs'),m=require('./material-assignment.cjs');
@@ -32,13 +32,18 @@ function fixture({sourceImage=null,paletteColors=['#FFFFFF','#222222'],formPolic
   delete ledger.stages[2].executionOptions;
   const assignment={...structuredClone(ledger.stages[2]),name:'material-assignment',input:sourceAsset,output:sourceAsset,checks:Object.fromEntries(g.ASSIGNMENT_CHECKS.map(k=>[k,pass()])),executionOptions:g.executionOptions('fixed-asset-grid',c),assignment:{plan:materialPlan,map}};
   ledger.stages.splice(3,0,assignment);ledger.stages.forEach((s,i)=>{s.stage=i+1;s.name=g.SEVEN_NAMES[i];});
-  c.stageChecks={version:3,stages:structuredClone(ledger.stages.slice(0,4))};
+  const old=structuredClone(ledger.stages),options=assignment.executionOptions;
+  const layout=save('line-layout.json',require('./source-line-layout.cjs').evidence(PNG,source,palette,options));
+  ledger.version=4;
+  ledger.stages=[{...old[0],output:sourceAsset},old[2],old[3],old[1],{...old[3],layout,executionOptions:options,checks:Object.fromEntries(g.LAYOUT_CHECKS.map(k=>[k,pass()]))},old[4],{...old[6],checks:{...old[5].checks,...old[6].checks}}];
+  ledger.stages.forEach((s,i)=>{s.stage=i+1;s.name=g.EIGHT_NAMES[i];});
+  c.stageChecks={version:4,stages:structuredClone(ledger.stages.slice(0,5))};
   const contract=save('contract.json',c),job=save('job.json',{contract:contract.path,background:c.background,sampling:'source-region-area'});
   return{dir,save,c,ledger,contract,job,run:path.join(dir,'run')};
 }
 function prepared(f=fixture()) {
   f.manifest=workflow.prepare(f.job.path,f.run,PNG);const x=f.manifest;
-  for(let i=4;i<7;i++){f.ledger.stages[i].input=i===4?x.source:x.native;f.ledger.stages[i].output=x.native;f.ledger.stages[i].evidence=[x.source,x.native];}
+  for(let i=5;i<7;i++){f.ledger.stages[i].input=i===5?x.source:x.native;f.ledger.stages[i].output=x.native;f.ledger.stages[i].evidence=[x.source,x.native];}
   let check=0;
   const observed=()=>({...pass(),evidence:['comparison'],comparison:{sourceRegion:[0,0,f.c.width*4,f.c.height*4],difference:'Synthetic comparison '+(++check),criterion:'Fixture shape remains square.',reason:'Recorded fixture evidence only; not actual art approval.'}});
   f.review={version:1,reviewer:observation,contractSha256:x.contract.sha256,native:x.native,expanded:x.expanded,stageChecks:f.ledger,
@@ -104,9 +109,10 @@ test('rehashed manual change cannot become an approved grid draft',()=>{
  assert.throws(()=>finish(f),/Candidate differs from deterministic conversion replay/);assert(!fs.existsSync(path.join(f.run,'locked-draft')));
 });
 test('finalize and verify never invoke conversion after lock',()=>{
- const f=prepared();lock(f);const original=b.buildNative,originalEnlarge=b.enlarge,gateModule=require('./check-delivery.cjs'),originalCheck=gateModule.checkDelivery,workflowPath=require.resolve('./run-pixel-workflow.cjs');
+ const f=prepared();lock(f);const original=b.buildNative,originalEnlarge=b.enlarge,gateModule=require('./check-delivery.cjs'),originalCheck=gateModule.checkDelivery,layoutModule=require('./source-line-layout.cjs'),originalLayout=layoutModule.evidence,workflowPath=require.resolve('./run-pixel-workflow.cjs');
  b.buildNative=()=>{throw Error('Forbidden post-lock conversion');};b.enlarge=()=>{throw Error('Forbidden post-lock resize');};gateModule.checkDelivery=()=>{throw Error('Forbidden post-lock source replay');};delete require.cache[workflowPath];
- try{const copyOnly=require(workflowPath);assert(copyOnly.finalize(f.run,f.reviewPath,PNG).exported);assert(copyOnly.verify(f.run,PNG).receiptValid);}finally{b.buildNative=original;b.enlarge=originalEnlarge;gateModule.checkDelivery=originalCheck;delete require.cache[workflowPath];}
+ layoutModule.evidence=()=>{throw Error('Forbidden post-lock layout planning');};
+ try{const copyOnly=require(workflowPath);assert(copyOnly.finalize(f.run,f.reviewPath,PNG).exported);assert(copyOnly.verify(f.run,PNG).receiptValid);}finally{b.buildNative=original;b.enlarge=originalEnlarge;gateModule.checkDelivery=originalCheck;layoutModule.evidence=originalLayout;delete require.cache[workflowPath];}
 });
 for(const status of ['FAIL','UNVERIFIED'])test(status+' feature cannot export',()=>{const f=prepared();f.review.features[0].fidelity.status=status;assert.equal(finish(f).exported,false);assert(!fs.existsSync(path.join(f.run,'delivery')));});
 test('missing feature review cannot export',()=>{const f=prepared();f.review.features.pop();assert.equal(finish(f).exported,false);});
@@ -114,6 +120,9 @@ test('missing actual-size review cannot export',()=>{const f=prepared();delete f
 test('open defect cannot be outvoted by passed checks',()=>{const f=prepared();f.review.findings=[{id:'gap',status:'OPEN',description:'Unresolved gap'}];assert.equal(finish(f).exported,false);});
 test('stale evidence binding cannot export',()=>{const f=prepared();f.review.evidence[0].bindings.native='0'.repeat(64);assert.equal(finish(f).exported,false);});
 test('missing stage record prevents creation',()=>{const f=fixture();delete f.c.stageChecks;f.save('contract.json',f.c);assert.throws(()=>workflow.prepare(f.job.path,f.run,PNG),/stage record required/);assert(!fs.existsSync(f.run));});
+test('missing line-plane execution proof cannot pass as an optional check',()=>{const f=fixture();delete f.c.stageChecks.stages[4].layout;f.save('contract.json',f.c);assert.throws(()=>workflow.prepare(f.job.path,f.run,PNG),/artifact/);assert(!fs.existsSync(f.run));});
+test('changed layout cannot be approved by rehashing its evidence',()=>{const f=fixture(),s=f.c.stageChecks.stages[4];s.layout=f.save('false-layout.json',{version:1,executed:true,method:'source-line-plane-layout',layouts:[]});f.save('contract.json',f.c);assert.throws(()=>workflow.prepare(f.job.path,f.run,PNG),/layout evidence differs/);assert(!fs.existsSync(f.run));});
+test('previous seven-stage records are historical evidence only',()=>{const f=fixture();f.c.stageChecks.version=3;f.save('contract.json',f.c);assert.throws(()=>workflow.prepare(f.job.path,f.run,PNG),/Eight-stage record required/);assert(!fs.existsSync(f.run));});
 test('visible eyes cannot enter production with color cleanup only',()=>{
  const f=fixture();f.c.eyePolicy={version:1,visibility:'visible',observation:'Observed dark dot.',eyes:[{name:'dot',rect:[8,8,8,8],sourcePolygon:[[8,8],[16,8],[16,16],[8,16]],reflection:'off',roles:[{name:'dot',color:'#222222',colors:['#222222'],samples:[[34,34,34]]}]}]};
  f.save('contract.json',f.c);assert.throws(()=>workflow.prepare(f.job.path,f.run,PNG),/source-partitions/);assert(!fs.existsSync(f.run));
@@ -137,4 +146,4 @@ test('stale review cannot point to another run',()=>{const f=prepared();f.review
 test('published output tampering fails verify',()=>{const f=prepared();finish(f);fs.appendFileSync(path.join(f.run,'delivery/native.png'),'changed');assert.throws(()=>workflow.verify(f.run,PNG),/Changed artifact/);});
 test('missing runtime fingerprint cannot be treated as verified',()=>{const f=prepared();const mf=path.join(f.run,'run.json'),manifest=JSON.parse(fs.readFileSync(mf));manifest.converters.pop();fs.writeFileSync(mf,JSON.stringify(manifest));assert.throws(()=>finish(f),/code changed/);});
 test('actual off-palette output fails independent saved-PNG check',()=>{const f=prepared(),im=PNG.sync.read(fs.readFileSync(f.manifest.native.path));im.data.writeUInt32BE(0xff0000ff,0);f.review.native=f.save('bad.png',PNG.sync.write(im));f.review.expanded=f.save('bad-big.png',PNG.sync.write(b.enlarge(PNG,im,4)));f.save('review.json',f.review);assert.equal(checkDelivery(f.manifest.contract.path,f.reviewPath,PNG).technical,'FAIL');});
-console.log(JSON.stringify({passed,scope:'Synthetic seven-stage delivery gates and deterministic replay; no visual quality claim'}));
+console.log(JSON.stringify({passed,scope:'Synthetic eight-stage delivery gates and deterministic replay; no visual quality claim'}));

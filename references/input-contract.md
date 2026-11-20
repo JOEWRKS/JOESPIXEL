@@ -8,7 +8,7 @@
 
 눈 테두리의 소유 다각형은 원본 선 단면 전체를 포함해야 한다. 내부 색면에서 임의의 고정 폭만 넓혀 정하지 않는다. 닫힌 테두리 역할에는 필요시 `interiorRoles`로 실제 안쪽의 면·반사 역할 이름을 지정하여 바깥 피부/얼굴색 유입을 막는다. 출처 미정의 주변 잉크는 두께 검사에서 면제하지 않는다. 같은 색의 실제 주변 채움은 별도 눈 역할 또는 재질 계획의 `geometry: "fill"` 관찰로 구분한다.
 
-눈의 `contextRoles`에는 홍채 관찰 영역의 가장자리에도 존재하는 피부·흰자 같은 `baseRoles`의 채움 역할만 지정한다. 이 역할은 경계 화소를 홍채색으로 강제하지 않도록 분류에 함께 참여한다. 보호 동공이나 선은 넣지 않는다. 같은 RGB가 동공/속눈썹 또는 반사/흰자에 쓰이면 해당 partition의 역할이 우선한다. 실제 눈 밖은 기존 재질 배정색을 이어받는다. `role.samplePoints`를 지정하면 `samples`와 같은 순서의 원본 정수 좌표 `[x,y]`를 넣는다. 현재 원본 RGB와 일치해야 하며, 재질에 해당하는 context 표본은 실제 소유 재질도 일치해야 한다. 새 원안에 옛 RGB나 머리 경계 표본을 피부색으로 재사용하지 않는다.
+눈의 `contextRoles`에는 홍채 관찰 영역의 가장자리에도 존재하는 피부·흰자 같은 `baseRoles`의 채움 역할만 지정한다. 이 역할은 경계 화소를 홍채색으로 강제하지 않도록 분류에 함께 참여한다. 보호 동공이나 선은 넣지 않는다. 같은 RGB가 동공/속눈썹 또는 반사/흰자에 쓰이면 해당 partition의 역할이 우선한다. 실제 눈 밖은 기존 재질 배정색을 이어받는다. `role.samplePoints`를 지정하면 `samples`와 같은 순서의 원본 정수 좌표 `[x,y]`를 넣는다. 현재 원본 RGB와 일치해야 하며, 재질에 해당하는 context 표본은 실제 소유 재질도 일치해야 한다. 새 원안에 옛 RGB나 머리 경계 표본을 피부색으로 재사용하지 않는다. 해당 지점이 그 역할에 속한다는 의미까지 관찰했다면 `role.verifySampleOwnership: true`를 함께 지정한다. 이 경우 samplePoints가 눈 소유 영역 안에서 실제로 그 역할로 분류돼야 하며, partition이 눈꺼풀·홍채 테두리를 다른 색 역할로 강제하면 격자 배치 전에 중단한다. 단순 색 표본은 이 옵션을 켜지 않으며 기존 분류 결과를 바꾸지 않는다.
 
 `outlinePolicy.sourceInkRoles[].family`는 원본에서 이어지는 선의 서로 다른 색 역할에만 같은 이름을 준다. 연결 판단은 공유하되 각 역할의 색은 유지한다. 실제 배경 틈을 잇거나 주변 채움 면을 선으로 바꾸는 권한은 아니다. 미지정 입력은 기존 색별 연결 방식을 유지한다.
 
@@ -64,7 +64,7 @@ node scripts/run-pixel-workflow.cjs verify /absolute/path/new-run
 | `pixelDecision`, `outlineDecision` | 선택한 규격과 이유. 외곽선 정식 경로는 `mode: continuous`, `width: 1`, `colorPolicy: darker-local-material` |
 | `features` | `{id, sourceObservation, criterion}` 목록. 캐릭터는 `eyes/nose/mouth/skin/outline` 필수. 손·접촉 등 실제 필요한 항목을 추가 |
 | `requiredFindings` | 사용자가 지적한 미해결 결함 ID 목록. 이후 검수에서 누락 금지 |
-| `stageChecks` | `version: 3`, 1–4단계의 완료 기록. 해당 파일·실행 입력·배정표를 결속 |
+| `stageChecks` | `version: 4`, 1–5단계의 완료 기록. 해당 파일·실행 입력·배정표·공동 배치 증거를 결속 |
 
 부분 수정은 선택적으로 `baseline`, `allowedRects`, `protectedRects`를 선언하여 영역 밖 불변을 검사한다. 이 사각형은 **수정 범위 제한**이며 목적지 도트를 칠하는 지시가 아니다. 부분 수정의 기술적 불변을 형태 개선으로 보고하지 않는다.
 
@@ -147,12 +147,17 @@ node scripts/run-pixel-workflow.cjs verify /absolute/path/new-run
 
 ## 단계 기록
 
-각 레코드는 `stage`, `name`, `status`, `reviewer`, `reference`, `input`, `output`, `palette`, `grid`, `evidence`, `checks`를 가진다. 필수 검사 키는 `stage-gates.cjs`의 `SEVEN_CHECKS`, 세부 관찰은 `detailChecksForStage`가 기준이다.
+각 레코드는 `stage`, `name`, `status`, `reviewer`, `reference`, `input`, `output`, `palette`, `grid`, `evidence`, `checks`를 가진다. 순서는 `stage-gates.cjs`의 `EIGHT_NAMES`다. 공통 의미 검사는 기존 검증 함수를 재사용하지만, 신규 실행은 version 4만 허용한다.
 
 - 1단계: `colorGroups`, `execution: {version:1, route:fixed-asset-grid, sampling:source-region-area, operations:[...], fixedGridUserRequest:"사용자 조건과 선정 근거"}`. `operations`는 사용한 `eyePolicy/formPolicy/outlinePolicy/materialPlan`을 명시한다.
-- 2단계: 서로 다른 격자의 실제 `native/expanded/outlineMask` 증거, 필수 경계 목록, 경계별 `coverage/width/continuity/flow/clearance` 관찰, 선택 이유를 `selection`에 기록한다. 스키마는 `assertCapacitySelection`에서 검증한다.
-- 4단계: `executionOptions('fixed-asset-grid', contract)`와 `assignment: {plan, map}`. input/output은 같은 초안이다. source map은 실행 계획에서 재현되어야 한다.
-- 5–7단계: 같은 격자·팔레트·배정표를 유지한다. 6단계 `action: modified|unchanged`는 실제 파일 차이와 일치해야 한다. 7단계는 이미지를 수정할 수 없다.
+- 2단계: 같은 요청에 따라 검수한 비픽셀 원안. 이 출력이 변환 source다.
+- 3단계: `assignment: {plan, map}`. input/output은 같은 원안이다. source map은 실행 계획에서 재현되어야 한다.
+- 4단계: 실제 `native/expanded/outlineMask` 후보, 필수 경계 목록, 경계별 `coverage/width/continuity/flow/clearance`와 선택 이유를 `selection`에 기록한다. 고정 크기는 하나, 미지정은 둘 이상을 시험한다.
+- 5단계: `executionOptions('fixed-asset-grid', contract)`와 `layout` JSON 파일 증거. `source-line-layout.evidence(PNG, source, palette, options)`가 만든 결과를 재실행하여 대조한다. `LAYOUT_CHECKS`의 각 시각 항목도 따로 확인한다. 계획이 없는 경우에도 실행 증거는 생략하지 않는다.
+- 6단계: 실제 native 격자 초안. 7단계는 원안 대비 검수이며 이미지를 수정할 수 없다. 수정은 원인 단계로 돌아가 새 실행으로 한다.
+- 8단계: finalize가 잠긴 PNG 복사·재읽기 후 저장 기록을 만든다. verify가 기록과 실제 파일을 다시 확인한다.
+
+`materialPlan.lineLayouts`는 원안의 `sourcePolygon`, `paths`, `planes`를 받는다. 경로는 `id/points/color/priority/observation`, 면은 `id/polygon/axis/colors/observation`이다. 좌표는 원본 공간이다. `priority`는 `required` 또는 근거가 있는 `omit-subcell`이며, 면의 axis는 몸통에서 끝 방향의 원본 관찰이다. 목적지 칸·색 덧칠 지시는 차단한다. 기존 `surfaces` 영역과 중복할 수 없다. 코드가 머리 가닥을 자동 인식하는 것은 아니므로 이 관찰 입력이 필요한 사실을 보고한다.
 
 이전 단계 관찰을 뒤에서 새 결과에 맞춰 고쳐 쓰지 않는다. 변경이 필요하면 새 실행 디렉터리를 만든다.
 
@@ -160,7 +165,7 @@ node scripts/run-pixel-workflow.cjs verify /absolute/path/new-run
 
 `prepare`의 `diagnostics/`는 자동 생성되는 읽기용 중간 결과다. `trace.json`에 실제 실행 단계, PNG·픽셀 해시, 입력 결속과 변환 오류가 기록된다. 실패한 실행의 파일을 덮어쓰지 말고 새 실행 폴더를 사용한다. `BUILT`/변환 완료 상태는 시각 통과 또는 납품 승인이 아니다.
 
-`prepare`의 `review.pending.json`을 별도 파일로 복사해 직접 관찰한 내용을 채운다. 최종 `stageChecks`에는 1–7단계를 넣으며 1–4단계는 실행 시점 계약과 같아야 한다. `gridDraft.native/expanded/grid`는 pending의 실제 격자 초안과 일치해야 한다. `gridDraft.sourceComparison`에는 원안에서 달라진 선 폭·형태·생략을, `gridDraft.visual`에는 격자 초안의 실제 외곽선·필수 형태 검수를 각각 기록한다. 두 관찰은 다른 시각 검사처럼 `{status, observation, evidence}` 형식이며 누락·미달이면 잠글 수 없다.
+`prepare`의 `review.pending.json`을 별도 파일로 복사해 직접 관찰한 내용을 채운다. 검수 `stageChecks`에는 1–7단계를 넣으며 1–5단계는 실행 시점 계약과 같아야 한다. `gridDraft.native/expanded/grid`는 pending의 실제 격자 초안과 일치해야 한다. `gridDraft.sourceComparison`에는 원안에서 달라진 선 폭·형태·생략을, `gridDraft.visual`에는 격자 초안의 실제 외곽선·필수 형태 검수를 각각 기록한다. 두 관찰은 다른 시각 검사처럼 `{status, observation, evidence}` 형식이며 누락·미달이면 잠글 수 없다.
 
 `native/expanded`는 현재 후보 파일의 경로·해시다. `evidence` 항목에는 `id`, 파일 증거, `bindings: {source, native, baseline?}` 해시를 넣는다. 전체 이미지 항목 ID는 `$whole`이다.
 
@@ -182,3 +187,9 @@ node scripts/run-pixel-workflow.cjs verify /absolute/path/new-run
 내부 곡선의 `curve.flow: "smooth"`는 원본에서 둥근 진행이 확인된 경우만 사용한다. 양끝과 중간 경로를 같은 원본 중심선 기준으로 공동 평가하며, 방향 변화가 적다는 이유로 원본 굽힘을 펴지 않는다. 끝의 길이 범위·관찰 지점 사이 상승/하강·극점과 굽힘 폭은 유지한다. 원본의 양끝·극점 관찰이 필요하고, 모서리나 굽힘을 생략하는 옵션이 아니다. 모든 좌표는 원본 관찰용이며 목적지 도트 지정과 저장본 덧칠은 허용하지 않는다.
 
 `smooth` 곡선은 소스 중심선과의 거리도 평가하고, 끝의 길이 방향 범위를 유지하면서 실제 잉크가 걸친 인접 행/열 중 전체 흐름에 맞는 끝점을 함께 선택한다. 격자 경계에 걸친 가장 바깥 픽셀을 무조건 고정해 돌출시키지 않는다. `smooth`가 아닌 모서리 끝점은 원래 끝 범위를 유지한다.
+
+
+보호된 `source-oval` 동공은 가장 가까운 원본 중심 배치를 우선한다. 그 칸이 실제 배치된 눈꺼풀 선과 충돌할 때만, 동공 원본 잉크가 겹치는 같은 홍채 면의 인접 후보를 함께 검토한다. 크기를 늘리거나 선·흰자를 덮지 않고, 이동은 축별 1논리 칸 이내에서 원본 겹침과 중심 오차로 선택한다. `placement: source-supported-beside-stroke`와 실제 이동량을 보고하며, 이 수용력 검사도 시선·눈매의 시각 검수를 대신하지 않는다.
+
+
+관찰된 둥근 홍채를 칸별 면적 투표가 납작하게 만들면 대표 홍채 역할에 `shape: "source-family-oval", protect: true`를 명시한다. 같은 family의 실제 원본 면적·가로세로 비율을 함께 사용해 작은 정수 격자 형태를 고르고, 눈꺼풀과 다른 필수 역할의 마지막 칸을 침범하지 않는다. 원본 홍채가 겹친 칸만 후보로 쓰며, 같은 면 안의 동공은 그 뒤에 배치한다. 기본 면적 투표가 필요한 다른 눈에는 자동 적용하지 않는다. 원본 분류가 조각나거나 배치할 공간이 없으면 중단하고, 원본의 모든 속눈썹·반사 복원으로 보고하지 않는다.

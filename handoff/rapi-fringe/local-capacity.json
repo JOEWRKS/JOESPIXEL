@@ -1,0 +1,46 @@
+{
+  "source": {
+    "path": "C:\\Users\\tjdwo\\.codex\\visualizations\\2026\\10\\15\\01a13ea6-d785-7302-bf6e-4ddf6c264b29\\rapi-face-geometry-20261119\\source.png",
+    "sha256": "9db45563fb8ce5ca6573c2ad5abc953b184c46654c193dedba47e13957b0af42"
+  },
+  "sourceStrip": [
+    504,
+    160,
+    20,
+    8
+  ],
+  "cell": 8,
+  "components": [
+    {
+      "sourcePixels": 13,
+      "x": [
+        509,
+        513
+      ],
+      "y": [
+        160,
+        167
+      ],
+      "nativeColumns": [
+        63,
+        64
+      ]
+    },
+    {
+      "sourcePixels": 10,
+      "x": [
+        518,
+        519
+      ],
+      "y": [
+        160,
+        167
+      ],
+      "nativeColumns": [
+        64
+      ]
+    }
+  ],
+  "oneCellGapWithBothLinesInsideObservedCoverage": false,
+  "scope": "Local necessary condition only: two distinct source strokes plus one native hair-space column in this fixed grid row. Not a global impossibility verdict for all bangs or eyes."
+}
