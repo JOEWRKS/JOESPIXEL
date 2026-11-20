@@ -257,6 +257,13 @@ function placeSourceEyePartitions(PNG,source,baseline,palette,policy,grid,materi
    const actual=labels.get(y*source.width+x);
    if(actual!==r)throw Error('Eye source sample assigned to another role: '+eye.name+'/'+roles[r].name+' at '+x+','+y+' -> '+(roles[actual]?.name??'outside ownership'));
   }
+  // A partition that allows a glint but not the sclera turns every pale pixel
+  // into a glint, so sclera slivers inside the iris outline became extra
+  // highlights. A light-role pixel whose source RGB is closer to the observed
+  // white samples than to the light samples is sclera and takes the white role.
+  const lightIndex=roles.findIndex(r=>r.name==='light'),whiteIndex=roles.findIndex(r=>r.family==='white'&&r.geometry!=='stroke');let scleraJoined=0;
+  if(lightIndex>=0&&whiteIndex>=0)for(const [q,r] of labels){if(r!==lightIndex)continue;const lab=toLab([...source.data.subarray(q*4,q*4+3)]);
+   if(Math.min(...roles[whiteIndex].labs.map(v=>distance(v,lab)))<Math.min(...roles[lightIndex].labs.map(v=>distance(v,lab)))){labels.set(q,whiteIndex);sourceCounts[lightIndex]--;sourceCounts[whiteIndex]++;sourceRoleMap.data.writeUInt32BE(rgba(roles[whiteIndex].color),q*4);scleraJoined++;}}
   const attachmentReports=[];
   for(let r=0;r<roles.length;r++)if(roles[r].attachedFill){
    const mask=new Set([...labels].filter(([,v])=>v===r).map(([q])=>q));
@@ -283,6 +290,28 @@ function placeSourceEyePartitions(PNG,source,baseline,palette,policy,grid,materi
     labels.set(q,best);sourceCounts[r]--;sourceCounts[best]++;sourceRoleMap.data.writeUInt32BE(rgba(roles[best].color),q*4);
    }
   }
+  // A one-dot stroke paints a whole cell even where the source line is a
+  // 1-3 px tail or nub (an inner lid corner, an iris rim sliver). In a small
+  // eye such a cell takes the only white, iris or glint cell. An open-stroke
+  // cell yields to the eye fill when its own pigment covers under half of the
+  // cell and under half of the stroke's median cell coverage, eye fill/glint
+  // pigment covers more and at least a quarter of the cell, and the stroke
+  // stays one connected piece.
+  // Closed rims and the last cell never yield.
+  const prunedStrokeCells=[];
+  if(policy.geometryPolicy){const cellArea=(grid.x[0][1]-grid.x[0][0])*(grid.y[0][1]-grid.y[0][0]),W=image.width;
+   const coverage=p=>{const [a,b]=grid.x[p%W],[c,d]=grid.y[Math.floor(p/W)],m=new Map();for(let sy=Math.floor(c);sy<Math.ceil(d);sy++)for(let sx=Math.floor(a);sx<Math.ceil(b);sx++){const r=labels.get(sy*source.width+sx);if(r!==undefined)m.set(r,(m.get(r)||0)+1);}return m;};
+   for(const plan of strokePlans){if(roles[plan.role].closed)continue;let again=true;
+    // A tail is thin relative to its own stroke: a uniformly thin lid is still a lid.
+    const owns=[...plan.cells].map(p=>coverage(p).get(plan.role)||0).sort((u,v)=>u-v),median=owns[Math.floor(owns.length/2)];
+    while(again&&plan.cells.size>1){again=false;
+     for(const p of [...plan.cells]){if(plan.cells.size<=1)break;
+      // Any cell may yield, end or side nub, if the stroke stays one connected piece.
+      const rest=new Set(plan.cells);rest.delete(p);if(require('./raster-source-ink-paths.cjs').strokeTopology(rest,W,image.height).components!==require('./raster-source-ink-paths.cjs').strokeTopology(plan.cells,W,image.height).components)continue;
+      const m=coverage(p),own=m.get(plan.role)||0;let fill=0;for(const [r,n] of m)if((roles[r].geometry==='fill'||roles[r].geometry==='feature')&&roles[r].family!==roles[plan.role].family)fill+=n;
+      if(own<cellArea/2&&own<median/2&&fill>own&&fill>=cellArea/4){plan.cells.delete(p);strokeClaims.delete(p);prunedStrokeCells.push({role:roles[plan.role].name,cell:[p%W,Math.floor(p/W)],strokePixels:own,fillPixels:fill});again=true;}
+     }}
+   }}
   for(let y=0;y<image.height;y++)for(let x=0;x<image.width;x++){
    const [a,b]=grid.x[x],[c,d]=grid.y[y];if(a>=rx+rw||b<=rx||c>=ry+rh||d<=ry)continue;
    const groups=new Map(),p=y*image.width+x,interiorPlan=strokePlans.find(plan=>plan.nativeInterior?.has(p));let owned=0;
@@ -364,7 +393,7 @@ function placeSourceEyePartitions(PNG,source,baseline,palette,policy,grid,materi
   if(policy.geometryPolicy){const cellArea=(grid.x[0][1]-grid.x[0][0])*(grid.y[0][1]-grid.y[0][0]);
    for(let r=0;r<roles.length;r++)if(roles[r].required===false&&roles[r].geometry!=='feature'&&sourceCounts[r]>=2*cellArea&&![...nativeRoles.values()].includes(r)){
     const error=new Error('Eye joint placement erased an observed plane of '+(sourceCounts[r]/cellArea).toFixed(1)+' cells: '+eye.name+'/'+roles[r].name+'. Check whether a stroke role (lid) owns an ink rim inside this plane; give the rim to the plane partition.');error.fillShapes=fillShapes;throw error;}}
-  reports.push({name:eye.name,cells,roles:roles.map((r,i)=>({name:r.name,color:r.color,family:r.family,sourcePixels:sourceCounts[i],nativeCells:[...nativeRoles.values()].filter(v=>v===i).length})),reflection,geometry,fillShapes,...(attachmentReports.length?{attachments:attachmentReports}:{})});
+  reports.push({name:eye.name,cells,roles:roles.map((r,i)=>({name:r.name,color:r.color,family:r.family,sourcePixels:sourceCounts[i],nativeCells:[...nativeRoles.values()].filter(v=>v===i).length})),reflection,geometry,fillShapes,...(attachmentReports.length?{attachments:attachmentReports}:{}),...(prunedStrokeCells.length?{prunedStrokeCells}:{}),...(scleraJoined?{lightPixelsMovedToWhite:scleraJoined}:{})});
  }
  let changed=0;for(let p=0;p<baseline.width*baseline.height;p++)if(image.data.readUInt32BE(p*4)!==baseline.data.readUInt32BE(p*4))changed++;
  return {image,sourceRoleMap,report:{status:'AWAITING_SAVED_VISUAL_REVIEW',rule:'source-partitions/family-before-tone',changed,eyes:reports,limitation:'Observed source partitions and samples require visual review. Reproduction is not shape approval.'}};

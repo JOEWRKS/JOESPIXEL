@@ -30,8 +30,22 @@ test('an open stroke whose source pixels enclose an interior is blocked with loc
 const dir=path.join(__dirname,'..','handoff','mechanic-eyes'),c=JSON.parse(fs.readFileSync(path.join(dir,'case.json')));
 const face=PNG.sync.read(fs.readFileSync(path.join(dir,'face.png'))),pal=parsePalette(c.palette);
 const build=eyes=>buildNative(PNG,face,pal,c.native[0],c.native[1],c.background,'source-region-area',null,null,null,eyes);
-test('a lid stroke that eats an observed iris plane is blocked, not delivered',()=>{
- assert.throws(()=>build(c.rimInBase),/erased an observed plane of [0-9.]+ cells: left-eye\/iris-dark/);
+test('lid tails and rim nubs on an eye fill yield to the fill',()=>{
+ // Whole-iris partitions leave the ink rim in the lid role; thin rim cells must not take the iris.
+ const r=build(c.rimInBase).eyePolicyReport,left=r.eyes.find(e=>e.name==='left-eye');
+ assert(left.prunedStrokeCells.length>0);
+ for(const name of ['white','iris','iris-dark','pupil'])assert(left.roles.find(x=>x.name===name).nativeCells>0,name);
+});
+test('sclera inside an iris partition is not counted as extra glints',()=>{
+ const r=build(c.rimInRing).eyePolicyReport;
+ for(const e of r.eyes){assert(e.lightPixelsMovedToWhite>0,e.name);assert(e.roles.find(x=>x.name==='light').nativeCells<=1,e.name);}
+});
+test('the small eye keeps the source order white | glint over pupil | iris below',()=>{
+ // Source observation of the left eye at 8px cells (crop coordinates): white x4-5, glint (6,7),
+ // pupil column 7 rows 7-8, green row 9. Checked on the saved roles, not painted.
+ const r=build(c.rimInRing),left=r.eyePolicyReport.eyes.find(e=>e.name==='left-eye'),role=new Map();
+ const at=(x,y)=>{const i=(y*24+x)*4;return '#'+[0,1,2].map(k=>r.image.data[i+k].toString(16).padStart(2,'0')).join('').toUpperCase();};
+ assert.equal(at(6,7),'#F3F5F4');assert.equal(at(7,7),'#150D0A');assert.equal(at(7,8),'#150D0A');assert.equal(at(5,7),'#FAEDE6');assert.equal(at(7,9),'#499246');
 });
 test('ring partitions give the rim to the iris and keep every observed eye plane',()=>{
  const r=build(c.rimInRing).eyePolicyReport;
