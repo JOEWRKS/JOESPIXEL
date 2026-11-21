@@ -44,11 +44,11 @@ function constructEye({eye,roles,labels,source,grid,width,height,contextColorAt}
  // Columns come from the rounded horizontal extent (so the count does not
  // depend on the phase); each column takes the median top and bottom of the
  // set over its source columns, or of the nearest measured column.
- const columnBands=list=>{const bySource=new Map();for(const q of list){const x=xs(q),y=ys(q),b=bySource.get(x);if(!b)bySource.set(x,[y,y]);else{if(y<b[0])b[0]=y;if(y>b[1])b[1]=y;}}
+ const columnBands=(list,columns)=>{const bySource=new Map();for(const q of list){const x=xs(q),y=ys(q),b=bySource.get(x);if(!b)bySource.set(x,[y,y]);else{if(y<b[0])b[0]=y;if(y>b[1])b[1]=y;}}
   const xsAll=list.map(xs),span=place(loc.u(pct(xsAll,.02)),loc.u(pct(xsAll,.98)+1));
   const byCell=new Map();for(const [x,b] of bySource){const c=colOf(x);if(!byCell.has(c))byCell.set(c,[]);byCell.get(c).push(b);}
-  const measuredCols=[...byCell.keys()],out=new Map();
-  for(let c=span.start;c<span.start+span.n;c++){if(c<0||c>=width)continue;const near=byCell.has(c)?c:measuredCols.reduce((p,q)=>Math.abs(q-c)<Math.abs(p-c)?q:p);const bands=byCell.get(near);out.set(c,{top:loc.v(median(bands.map(b=>b[0]))),bottom:loc.v(median(bands.map(b=>b[1]))+1)});}
+  const measuredCols=[...byCell.keys()],out=new Map(),cols=columns??Array.from({length:span.n},(_,i)=>span.start+i);
+  for(const c of cols){if(c<0||c>=width)continue;const near=byCell.has(c)?c:measuredCols.reduce((p,q)=>Math.abs(q-c)<Math.abs(p-c)?q:p);const bands=byCell.get(near);out.set(c,{top:loc.v(median(bands.map(b=>b[0]))),bottom:loc.v(median(bands.map(b=>b[1]))+1)});}
   return out;};
  const measured={};
  // 1. Lid: per column, rounded measured thickness centred on the band.
@@ -57,51 +57,47 @@ function constructEye({eye,roles,labels,source,grid,width,height,contextColorAt}
  // A column whose rows differ from two agreeing neighbours is a notch.
  for(const c of [...lidRows.keys()].sort((a,b)=>a-b)){const l=lidRows.get(c-1),r=lidRows.get(c+1),m=lidRows.get(c);if(l&&r&&l.join()===r.join()&&m.join()!==l.join()&&Math.abs(m.length-l.length)<=1)lidRows.set(c,[...l]);}
  measured.lid={columns:[...lidBands].map(([c,b])=>({column:c,top:+b.top.toFixed(2),bottom:+b.bottom.toFixed(2)}))};
- // 2. Opening rows below the lid, per column.
- const openBands=columnBands(opening),open=new Map();
- // Vertical structure hangs from the lid: the rows below the lid row are
- // the rounded height that the source shows below the lid band. Rounding the
- // lid and the opening separately let their overlap change with the phase.
  const lidBottom=c=>lidBands.get(c)?.bottom,lidLastRow=c=>lidRows.has(c)?Math.max(...lidRows.get(c)):null;
+ const cells=new Map(),decisions=[];const set=(c,r,role)=>{if(c>=0&&c<width&&r>=0&&r<height)cells.set(r*width+c,role);};
+ const lidColor=roles[lidRoles[0]].color,ink=(c,r)=>{const [a,b]=grid.x[c]??[0,0],[d,e]=grid.y[r]??[0,0];let n=0;for(let y=Math.floor(d);y<Math.ceil(e);y++)for(let x=Math.floor(a);x<Math.ceil(b);x++){const q=y*W+x,l=labels.get(q);if(l!==undefined?lidRoles.includes(l):contextColorAt(q)===lidColor)n++;}return n;};
+ // 2-3. Horizontal structure hangs from the iris box: the box is the rounded
+ // iris width; each side gets the rounded measured sclera width (from the
+ // iris edge to the white's outer extent). Rounding the opening span on its
+ // own dropped a 6 px white column and let the column count follow the phase.
+ let box=null,openCols;
+ if(iris.length){
+  const ixs=iris.map(xs),ix0=loc.u(pct(ixs,.02)),ix1=loc.u(pct(ixs,.98)+1),iy0=loc.v(pct(iris.map(ys),.02)),iy1=loc.v(pct(iris.map(ys),.98)+1);
+  const pc=place(ix0,ix1),c0=pc.start,c1=pc.start+pc.n-1;
+  const leftWhite=white.filter(q=>xs(q)<pct(ixs,.02)).map(xs),rightWhite=white.filter(q=>xs(q)>pct(ixs,.98)).map(xs);
+  const wl=leftWhite.length>=cellArea/4?ix0-loc.u(pct(leftWhite,.02)):0,wr=rightWhite.length>=cellArea/4?loc.u(pct(rightWhite,.98)+1)-ix1:0;
+  const nl=Math.round(wl),nr=Math.round(wr);
+  openCols=Array.from({length:nl+pc.n+nr},(_,i)=>c0-nl+i);
+  measured.iris={sourceBox:[pct(ixs,.02),pct(iris.map(ys),.02),pct(ixs,.98)+1,pct(iris.map(ys),.98)+1],scleraCells:[+wl.toFixed(2),+wr.toFixed(2)],scleraColumns:[nl,nr]};
+  const lidCols=[];for(let c=c0;c<=c1;c++)if(lidRows.has(c))lidCols.push(c);
+  // Rows: the rounded height visible below the lid, hung under the median
+  // lid row of the iris columns. A sloping lid that covers an iris cell in
+  // one column takes it (the lid is written last); the count stays.
+  const top=lidCols.length?median(lidCols.map(lidLastRow))+1:place(iy0,iy1).start,visTop=lidCols.length?Math.max(iy0,median(lidCols.map(lidBottom))):iy0;
+  const visible=Math.max(1,Math.round(iy1-visTop)),rows=Array.from({length:visible},(_,i)=>top+i);
+  // Pupil and reflection are placed relative to the iris box, by their
+  // measured offset from the iris centre, so they move with the box.
+  box={c0,c1,rows,mapU:u=>u-(ix0+ix1)/2+(c0+c1+1)/2,mapV:v=>v-(visTop+iy1)/2+(rows[0]+rows.at(-1)+1)/2};
+  // A side without sclera closes with ink when ink lies within two cells.
+  for(const [dir,n] of [[-1,nl],[1,nr]]){if(n)continue;const c=dir<0?c0-1:c1+1;if(c<0||c>=width)continue;
+   for(const r of rows)if(ink(c,r)+ink(c+dir,r)>=cellArea/4){set(c,r,lidRoles[0]);(measured.sideContour??=[]).push([c,r]);}
+   decisions.push((dir<0?'left':'right')+' side has no sclera');}
+ }
+ // The upper lid bounds every open column: an open column past the measured
+ // lid span takes the nearest measured lid band (a lid end that droops
+ // below its neighbours otherwise left the top of the sclera open).
+ if(openCols){const missing=openCols.filter(c=>!lidRows.has(c));if(missing.length){const extra=columnBands(lid,missing);for(const [c,b] of extra){const p=place(b.top,b.bottom);lidRows.set(c,Array.from({length:p.n},(_,i)=>p.start+i));lidBands.set(c,b);}decisions.push('lid extended over open columns '+missing.join(','));}}
+ // Opening rows per column, hung from that column's lid.
+ const openBands=columnBands(opening,openCols),open=new Map();
  for(const [c,b] of openBands){let rows=[];
   if(lidLastRow(c)!==null){const n=Math.round(b.bottom-Math.max(b.top,lidBottom(c)));for(let i=1;i<=n;i++)rows.push(lidLastRow(c)+i);}
   else{const p=place(b.top,b.bottom);for(let r=p.start;r<p.start+p.n;r++)rows.push(r);}
   if(rows.length)open.set(c,rows);}
  measured.opening={columns:[...openBands].map(([c,b])=>({column:c,top:+b.top.toFixed(2),bottom:+b.bottom.toFixed(2)}))};
- const isOpen=(c,r)=>open.get(c)?.includes(r);
- const cells=new Map(),decisions=[];const set=(c,r,role)=>{if(c>=0&&c<width&&r>=0&&r<height)cells.set(r*width+c,role);};
- // 3. Iris box from robust extents of all iris-family pigment.
- let box=null;
- if(iris.length){
-  const ix0=loc.u(pct(iris.map(xs),.02)),ix1=loc.u(pct(iris.map(xs),.98)+1),iy0=loc.v(pct(iris.map(ys),.02)),iy1=loc.v(pct(iris.map(ys),.98)+1);
-  const pc=place(ix0,ix1),pr=place(iy0,iy1);let c0=pc.start,c1=pc.start+pc.n-1;
-  // Sclera kept on a side whose measured white is at least half a cell wide.
-  const irisRowsY=new Set(iris.map(ys)),side=dir=>{const edge=dir<0?pct(iris.map(xs),.02):pct(iris.map(xs),.98);const n=white.filter(q=>irisRowsY.has(ys(q))&&(dir<0?xs(q)<edge:xs(q)>edge)).length;return n/Math.max(1,irisRowsY.size);};
-  const whiteLeft=side(-1),whiteRight=side(1);
-  const openCols=[...open.keys()].sort((a,b)=>a-b);
-  if(openCols.length){if(c0<openCols[0])c0=openCols[0];if(c1>openCols.at(-1))c1=openCols.at(-1);}
-  if(whiteLeft>=cellW/2&&c0<=openCols[0]&&c1>c0){c0++;decisions.push('iris yields its left column to observed sclera');}
-  if(whiteRight>=cellW/2&&c1>=openCols.at(-1)&&c1>c0){c1--;decisions.push('iris yields its right column to observed sclera');}
-  const lidCols=[];for(let c=c0;c<=c1;c++)if(lidRows.has(c))lidCols.push(c);
-  // Rows: the rounded height visible below the lid, hung under the median
-  // lid row of the iris columns. A sloping lid that covers an iris cell in
-  // one column takes it (the lid is written last); the count stays.
-  const top=lidCols.length?median(lidCols.map(lidLastRow))+1:pr.start,visible=lidCols.length?Math.max(1,Math.round(iy1-Math.max(iy0,median(lidCols.map(lidBottom))))):pr.n;
-  const rows=[];for(let r=top;r<top+visible;r++)rows.push(r);
-  // Pupil and reflection are placed relative to the iris box, by their
-  // measured offset from the iris centre, so they move with the box.
-  const visTop=lidCols.length?Math.max(iy0,median(lidCols.map(lidBottom))):iy0;
-  if(rows.length)box={c0,c1,rows,whiteLeft,whiteRight,mapU:u=>u-(ix0+ix1)/2+(c0+c1+1)/2,mapV:v=>v-(visTop+iy1)/2+(rows[0]+rows.at(-1)+1)/2};
-  measured.iris={sourceBox:[pct(iris.map(xs),.02),pct(iris.map(ys),.02),pct(iris.map(xs),.98)+1,pct(iris.map(ys),.98)+1],whiteLeftPx:+whiteLeft.toFixed(1),whiteRightPx:+whiteRight.toFixed(1)};
- }
- const lidColor=roles[lidRoles[0]].color,ink=(c,r)=>{const [a,b]=grid.x[c]??[0,0],[d,e]=grid.y[r]??[0,0];let n=0;for(let y=Math.floor(d);y<Math.ceil(e);y++)for(let x=Math.floor(a);x<Math.ceil(b);x++){const q=y*W+x,l=labels.get(q);if(l!==undefined?lidRoles.includes(l):contextColorAt(q)===lidColor)n++;}return n;};
- // A side whose measured sclera is under half a cell has none on the grid:
- // opening columns that the rounded iris left there are not white. The
- // first of them closes the eye with ink when ink lies within two cells.
- if(box)for(const [dir,w] of [[-1,box.whiteLeft],[1,box.whiteRight]]){if(w>=cellW/2)continue;const edge=dir<0?box.c0:box.c1,beyond=c=>dir<0?c<edge:c>edge;
-  for(const c of [...open.keys()])if(beyond(c))open.delete(c);
-  for(const r of box.rows){const c=edge+dir;if(c<0||c>=width)continue;if(ink(c,r)+ink(c+dir,r)>=cellArea/4){set(c,r,lidRoles[0]);(measured.sideContour??=[]).push([c,r]);}}
-  decisions.push((dir<0?'left':'right')+' side has no sclera ('+w.toFixed(1)+' px)');}
  // 7. Sclera: open cells outside the iris box.
  const whiteRole=whiteRoles[0];
  for(const [c,rows] of open)for(const r of rows){if(box&&c>=box.c0&&c<=box.c1&&box.rows.includes(r))continue;if(whiteRole!==undefined)set(c,r,whiteRole);}
