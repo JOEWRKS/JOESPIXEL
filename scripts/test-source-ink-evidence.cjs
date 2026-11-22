@@ -24,4 +24,14 @@ test('one-pixel mixed fringe belongs to its ink, not a second palette stroke',()
  assert(r.fringeSourcePixels.includes(10*32+13));assert(!mask.has(12*32+13));
  for(let y=4;y<20;y++)assert(!mask.has(y*32+14),'Must not grow across flat white material');
 });
+// Two separate strokes with a material band between them; a mid-tone stripe crosses the band.
+const band=(stripe)=>{const im=new PNG({width:64,height:36}),mask=new Set(),pigment=new Uint32Array(64*36),ink=0x202020ff;
+ for(let p=0;p<64*36;p++)im.data.writeUInt32BE(0xffffffff,p*4);
+ for(let x=8;x<57;x++){for(const y of [10,11,12,22,23,24]){const p=y*64+x;im.data.writeUInt32BE(ink,p*4);mask.add(p);pigment[p]=ink;}for(let y=13;y<22;y++)im.data.writeUInt32BE(x>=30&&x<36?stripe:0xe6e6e6ff,(y*64+x)*4);}
+ return {im,mask,pigment};};
+test('a shade stripe nearer the material than the ink does not join two strokes',()=>{const t=band(0xaaaaaaff),r=reconcileSourceInk(t.im,t.mask,t.pigment,4,()=>false);assert.equal(r.addedSourcePixels-r.fringeSourcePixels.length,0);for(let y=14;y<21;y++)assert(!t.mask.has(y*64+32));});
+test('a dark stripe joins only when the caller confirms raw ink support',()=>{
+ const t=band(0x303030ff);reconcileSourceInk(t.im,t.mask,t.pigment,4,()=>false);assert(t.mask.has(17*64+32),'ink-dark stripe is continuity evidence');
+ const u=band(0x303030ff);reconcileSourceInk(u.im,u.mask,u.pigment,4,()=>false,()=>false);assert(!u.mask.has(17*64+32),'no support, no bridge');
+});
 console.log(JSON.stringify({tests,status:'PASS',scope:'Source role continuity only; saved image needs separate visual review'}));

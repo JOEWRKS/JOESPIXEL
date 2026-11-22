@@ -1,13 +1,22 @@
 'use strict';
 // Source-space evidence, before medial tracing. Narrow dark ridges can change
 // palette label along one continuous stroke. Neighboring material is not ink.
-function reconcileSourceInk(source,mask,pigment,step,protectedSource){
+// Being darker than both flanks is not enough: a shade plane (the mid-tone
+// band of a metal ring between two contours, a fold shadow on cloth) is
+// darker than its neighbours too, and joining across it merges two separate
+// source strokes. A ridge pixel must also lie on the ink side: nearer the
+// luminance of its nearest stroke pigment than that of its brighter flank.
+// When the caller supplies inkSupport, it must also carry the raw-ink support
+// used for subcell source bridges (nearest palette entry is the stroke's ink
+// family, or a measured ink/fill antialias mixture) for that pigment.
+function reconcileSourceInk(source,mask,pigment,step,protectedSource,inkSupport=null){
  const w=source.width,h=source.height,N=w*h,lum=new Float32Array(N);for(let p=0;p<N;p++){const k=p*4;lum[p]=.2126*source.data[k]+.7152*source.data[k+1]+.0722*source.data[k+2];}
  const near=(p,diag=true)=>{const x=p%w,y=Math.floor(p/w),out=[];for(let dy=-1;dy<=1;dy++)for(let dx=-1;dx<=1;dx++)if((dx||dy)&&(diag||!dx||!dy)&&x+dx>=0&&x+dx<w&&y+dy>=0&&y+dy<h)out.push((y+dy)*w+x+dx);return out;};
- const distance=new Int16Array(N).fill(-1),queue=[];for(const p of mask){distance[p]=0;queue.push(p);}const radius=Math.max(2,Math.ceil(step*3));for(let i=0;i<queue.length;i++)if(distance[queue[i]]<radius)for(const q of near(queue[i]))if(distance[q]<0&&!protectedSource(q)){distance[q]=distance[queue[i]]+1;queue.push(q);}
+ const pigmentLum=v=>.2126*(v>>>24)+.7152*(v>>>16&255)+.0722*(v>>>8&255);
+ const distance=new Int16Array(N).fill(-1),origin=new Uint32Array(N),queue=[];for(const p of mask){distance[p]=0;origin[p]=pigment[p];queue.push(p);}const radius=Math.max(2,Math.ceil(step*3));for(let i=0;i<queue.length;i++)if(distance[queue[i]]<radius)for(const q of near(queue[i]))if(distance[q]<0&&!protectedSource(q)){distance[q]=distance[queue[i]]+1;origin[q]=origin[queue[i]];queue.push(q);}
  const evidence=new Set(),directions=[[1,0],[0,1],[1,1],[1,-1]];
- for(const p of queue){if(mask.has(p)||protectedSource(p))continue;const x=p%w,y=Math.floor(p/w);let ridge=false;
-  for(const[dx,dy]of directions){for(let r=2;r<=Math.ceil(step*2);r++){const ax=x+dx*r,ay=y+dy*r,bx=x-dx*r,by=y-dy*r;if(Math.min(ax,bx)<0||Math.max(ax,bx)>=w||Math.min(ay,by)<0||Math.max(ay,by)>=h)continue;const a=ay*w+ax,b=by*w+bx;if(Math.min(lum[a],lum[b])-lum[p]>=24&&Math.abs(lum[a]-lum[b])<95){ridge=true;break;}}if(ridge)break;}
+ for(const p of queue){if(mask.has(p)||protectedSource(p)||inkSupport&&!inkSupport(p,origin[p]))continue;const x=p%w,y=Math.floor(p/w);let ridge=false;
+  for(const[dx,dy]of directions){for(let r=2;r<=Math.ceil(step*2);r++){const ax=x+dx*r,ay=y+dy*r,bx=x-dx*r,by=y-dy*r;if(Math.min(ax,bx)<0||Math.max(ax,bx)>=w||Math.min(ay,by)<0||Math.max(ay,by)>=h)continue;const a=ay*w+ax,b=by*w+bx;const flank=Math.min(lum[a],lum[b]);if(flank-lum[p]>=24&&Math.abs(lum[a]-lum[b])<95&&lum[p]-pigmentLum(origin[p])<=flank-lum[p]){ridge=true;break;}}if(ridge)break;}
   if(ridge)evidence.add(p);
  }
  const visited=new Set(),intervals=[],ambiguous=[];

@@ -95,7 +95,6 @@ function joint(PNG,source,base,palette,policy,material,features,sharedLabels,tra
   const foreground=owner>=0?material.plan.regions[owner].material!=='background':bgRGB.some((c,i)=>Math.abs(source.data[k+i]-c)>policy.backgroundTolerance);
   fg[p]=Number(source.data[k+3]>=128&&foreground);if(protectedSource(p)||sourceFill(p))continue;for(const role of policy.sourceInkRoles??[])if((!role.sourceRect||(p%sw>=role.sourceRect[0]&&p%sw<role.sourceRect[0]+role.sourceRect[2]&&Math.floor(p/sw)>=role.sourceRect[1]&&Math.floor(p/sw)<role.sourceRect[1]+role.sourceRect[3]))&&(role.paletteColors??[role.color]).some(c=>parseInt(c.slice(1)+'ff',16)===colors[p]))strokePigment[p]=parseInt(role.color.slice(1)+'ff',16);if(strokePigment[p])mask.add(p);}
  if(trace){const im=new PNG({width:sw,height:sh});for(let p=0;p<N;p++)im.data.writeUInt32BE(mask.has(p)?0x00ff00ff:fg[p]?0x4466aaff:0xffffffff,p*4);emit('source-ownership',im,{legend:'green=ink blue=foreground white=background'});}
- const sourceInkEvidence=require('./source-ink-evidence.cjs').reconcileSourceInk(source,mask,strokePigment,step,p=>protectedSource(p)||sourceFill(p));
  // Recover source-label connectivity before medial tracing. Only a short
  // subcell interval with observed raw ink/antialias support may join two
  // distinct same-pigment components; no background or flat material bridge.
@@ -103,13 +102,15 @@ function joint(PNG,source,base,palette,policy,material,features,sharedLabels,tra
  // Keep its local colors; do not turn pigment transitions into false ends.
  const families=new Map(policy.sourceInkRoles.map(r=>[parseInt(r.color.slice(1)+'ff',16),r.family??r.color]));
  const sameFamily=(a,b)=>families.get(a)===families.get(b);
- const component=new Int32Array(N).fill(-1);let componentId=0;
- for(const start of mask)if(component[start]<0){const q=[start];component[start]=componentId;for(let i=0;i<q.length;i++)for(const p of adj(q[i],sw,sh,true))if(mask.has(p)&&component[p]<0&&sameFamily(strokePigment[p],strokePigment[start])){component[p]=componentId;q.push(p);}componentId++;}
  const roleEntries=new Map(policy.sourceInkRoles.map(r=>[parseInt(r.color.slice(1)+'ff',16),entries.filter(e=>(r.paletteColors??[r.color]).includes(e.hex))])),allInk=new Set([...roleEntries.values()].flat().map(e=>e.v)),fills=entries.filter(e=>!allInk.has(e.v));
  const familyEntries=new Map([...roleEntries].map(([pigment])=>[pigment,[...roleEntries].filter(([other])=>sameFamily(other,pigment)).flatMap(([,colors])=>colors)]));
  const supportCache=new Map();const supported=(p,pigment)=>{if(protectedSource(p)||sourceFill(p))return false;const k=p*4,rgb=[source.data[k],source.data[k+1],source.data[k+2]],key=rgb.join(',')+':'+pigment;if(supportCache.has(key))return supportCache.get(key);const localInk=familyEntries.get(pigment),v=nearest(...rgb);let ok=localInk.some(e=>e.v===v);
    if(!ok&&Math.min(...fills.map(e=>Math.sqrt(dist(rgb,e.rgb))))>12)for(const a of localInk)for(const b of fills){const dv=a.rgb.map((c,i)=>c-b.rgb[i]),den=dv.reduce((s,c)=>s+c*c,0),t=rgb.reduce((s,c,i)=>s+(c-b.rgb[i])*dv[i],0)/(den||1);if(t>=.2&&t<=.85&&Math.sqrt(rgb.reduce((s,c,i)=>s+(c-b.rgb[i]-t*dv[i])**2,0))<=14)ok=true;}
    supportCache.set(key,ok);return ok;};
+ // Ridge continuity uses the same raw-ink support as subcell bridges below.
+ const sourceInkEvidence=require('./source-ink-evidence.cjs').reconcileSourceInk(source,mask,strokePigment,step,p=>protectedSource(p)||sourceFill(p),(p,pigment)=>familyEntries.has(pigment)&&supported(p,pigment));
+ const component=new Int32Array(N).fill(-1);let componentId=0;
+ for(const start of mask)if(component[start]<0){const q=[start];component[start]=componentId;for(let i=0;i<q.length;i++)for(const p of adj(q[i],sw,sh,true))if(mask.has(p)&&component[p]<0&&sameFamily(strokePigment[p],strokePigment[start])){component[p]=componentId;q.push(p);}componentId++;}
  const candidates=new Map(),radius=Math.max(2,Math.floor(step));
  for(const p of mask){if(adj(p,sw,sh,true).every(q=>mask.has(q)))continue;const x=p%sw,y=Math.floor(p/sw);for(let dy=-radius;dy<=radius;dy++)for(let dx=-radius;dx<=radius;dx++){
    const xx=x+dx,yy=y+dy,q=yy*sw+xx;if(xx<0||yy<0||xx>=sw||yy>=sh||q<=p||!mask.has(q)||component[p]===component[q]||!sameFamily(strokePigment[p],strokePigment[q])||dx*dx+dy*dy>radius*radius)continue;

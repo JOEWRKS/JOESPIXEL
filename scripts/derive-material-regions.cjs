@@ -9,6 +9,14 @@
 // It is a spatial helper, not semantic recognition: wrong tables give wrong regions.
 // The output {regions, inventory} goes into materialPlan; every region is listed under its
 // material so the inventory check stays executable.
+// Two observation gaps are surfaced instead of silently painted:
+// - a flat area whose colours are all shared takes its surroundings; if the surrounding material
+//   does not list that colour (a grey button centre inside its ink ring, where the grey is shared
+//   by steel and cloth) the table is missing the area's own material. Areas of minArea px or more
+//   stop with their position.
+// - a flat area farther than farColor (RGB distance) from every palette colour is reported in
+//   offPaletteFlatAreas (a brass button with no brass in the palette). Gradient mid-tones can also
+//   appear there, so the observer reads the list; it does not stop.
 //
 // node scripts/derive-material-regions.cjs --source S.png --palette P.json --materials M.json
 //   --out regions.json --map map.png [--flat 12]
@@ -24,7 +32,7 @@ const {PNG}=require(require.resolve('pngjs',{paths:[__dirname,process.cwd()]}));
 const {parsePalette}=require('./build-palette-native.cjs');
 const {sourceStrokeClassifier}=require('./raster-observed-details.cjs');
 
-function derive(source,palette,materials,{flat=12}={}){
+function derive(source,palette,materials,{flat=12,minArea=32,farColor=40}={}){
  // A colour may serve several materials (a white top and an eye white, a shirt shadow and
  // steel). Shared colours never seed: their pixels take the material of the surrounding
  // unshared seeds, so ownership follows position, not RGB.
@@ -43,11 +51,16 @@ function derive(source,palette,materials,{flat=12}={}){
  for(let y=0;y<h;y++)for(let x=0;x<w;x++){const i=(y*w+x)*4;let ok=true;for(const [dx,dy] of [[1,0],[-1,0],[0,1],[0,-1]]){const a=x+dx,b=y+dy;if(a<0||b<0||a>=w||b>=h)continue;if(diff(i,(b*w+a)*4)>flat){ok=false;break;}}isFlat[y*w+x]=ok?1:0;}
  // Each connected flat area votes once: neighbouring materials with nearly equal colours (a
  // leather pouch and a hair tone) cannot leave speckles of the wrong material inside it.
+ const nearestRGB=c=>{let best=0,bd=Infinity;for(let k=0;k<rgb.length;k++){const e=(c[0]-rgb[k][0])**2+(c[1]-rgb[k][1])**2+(c[2]-rgb[k][2])**2;if(e<bd){bd=e;best=k;}}return best;};
+ const box=area=>{let x0=w,y0=h,x1=0,y1=0;for(const p of area){const x=p%w,y=Math.floor(p/w);x0=Math.min(x0,x);y0=Math.min(y0,y);x1=Math.max(x1,x);y1=Math.max(y1,y);}return [x0,y0,x1,y1];};
+ const offPalette=[],sharedOnly=[];
  const seen=new Uint8Array(w*h),queue=[];let areas=0;
  for(let s=0;s<w*h;s++){if(!isFlat[s]||seen[s])continue;const area=[s];seen[s]=1;
   for(let q=0;q<area.length;q++){const p=area[q],x=p%w,y=Math.floor(p/w);for(const [dx,dy] of [[1,0],[-1,0],[0,1],[0,-1]]){const a=x+dx,b=y+dy;if(a<0||b<0||a>=w||b>=h)continue;const n=b*w+a;if(isFlat[n]&&!seen[n]&&diff(p*4,n*4)<=flat){seen[n]=1;area.push(n);}}}
-  const votes=new Map();for(const p of area){const o=owner[nearest(p*4)];if(o>=0)votes.set(o,(votes.get(o)||0)+1);}
-  if(!votes.size)continue;areas++;const m=[...votes].sort((a,b)=>b[1]-a[1]||a[0]-b[0])[0][0];for(const p of area){label[p]=m;queue.push(p);}}
+  const votes=new Map(),tones=new Map();for(const p of area){const k=nearest(p*4),o=owner[k];tones.set(k,(tones.get(k)||0)+1);if(o>=0)votes.set(o,(votes.get(o)||0)+1);}
+  if(area.length>=minArea){const mean=[0,1,2].map(c=>area.reduce((t,p)=>t+d[p*4+c],0)/area.length),k=nearestRGB(mean),distance=Math.hypot(...mean.map((v,c)=>v-rgb[k][c]));
+   if(distance>farColor)offPalette.push({bbox:box(area),pixels:area.length,meanColor:mean.map(Math.round),nearest:palette[k].hex,distance:Math.round(distance)});}
+  if(!votes.size){if(area.length>=minArea)sharedOnly.push({area,color:[...tones].sort((a,b)=>b[1]-a[1])[0][0]});continue;}areas++;const m=[...votes].sort((a,b)=>b[1]-a[1]||a[0]-b[0])[0][0];for(const p of area){label[p]=m;queue.push(p);}}
  const lineMarks=[];
  materials.forEach((m,mi)=>{if(m.lineMarks===undefined)return;if(!Array.isArray(m.lineMarks)||!m.lineMarks.length)throw Error('lineMarks must be a non-empty list: '+m.material);
   for(const mark of m.lineMarks){const [x0,y0,rw,rh]=mark.sourceRegion??[];
@@ -58,12 +71,15 @@ function derive(source,palette,materials,{flat=12}={}){
    lineMarks.push({material:m.material,name:mark.name,pixels});}});
  if(!queue.length)throw Error('Source has no flat pixels to seed materials');
  for(let q=0;q<queue.length;q++){const p=queue[q],x=p%w,y=Math.floor(p/w);for(const [dx,dy] of [[1,0],[-1,0],[0,1],[0,-1]]){const a=x+dx,b=y+dy;if(a<0||b<0||a>=w||b>=h)continue;const n=b*w+a;if(label[n]<0){label[n]=label[p];queue.push(n);}}}
+ const contradictions=[];for(const {area,color} of sharedOnly){const got=new Map();for(const p of area)got.set(label[p],(got.get(label[p])||0)+1);const m=[...got].sort((a,b)=>b[1]-a[1])[0][0];
+  if(m<0||!materials[m].colors.includes(palette[color].hex))contradictions.push({bbox:box(area),pixels:area.length,color:palette[color].hex,listedBy:owners[color].map(i=>materials[i].material),assigned:m<0?null:materials[m].material});}
+ if(contradictions.length)throw Object.assign(Error('Shared-colour flat area took a material that does not list its colour; declare its material with an unshared colour, or a mark (lineMarks) over it: '+contradictions.map(c=>c.pixels+'px at '+c.bbox.join(',')+' '+c.color+' (listed by '+c.listedBy.join('/')+') -> '+c.assigned).join('; ')),{contradictions});
  const regions=[],counts=materials.map(()=>0);
  for(let y=0;y<h;y++){let x=0;while(x<w){const m=label[y*w+x];let e=x+1;while(e<w&&label[y*w+e]===m)e++;const mat=materials[m];
   regions.push({id:`${mat.material}-${counts[m]++}`,material:mat.material,polygon:[[x,y],[e,y],[e,y+1],[x,y+1]],colors:mat.colors,baseColor:mat.baseColor,boundaryRoles:[],observation:mat.observation??'Material table observation; each connected flat area votes once and transition pixels take the nearest area.'});x=e;}}
  const map=new PNG({width:w,height:h});for(let p=0;p<w*h;p++){const c=rgb[hex.get(materials[label[p]].baseColor)];map.data.set([...c,255],p*4);}
  const inventory=materials.map(m=>({id:m.material,decision:'assigned',regionIds:regions.filter(r=>r.material===m.material).map(r=>r.id),observation:m.observation??'Material table observation.'})).filter(i=>i.regionIds.length);
- return {regions,inventory,map,lineMarks,summary:materials.map((m,i)=>({material:m.material,rows:counts[i],pixels:label.reduce((s,v)=>s+(v===i),0)}))};
+ return {regions,inventory,map,lineMarks,offPaletteFlatAreas:offPalette.sort((a,b)=>b.distance-a.distance),summary:materials.map((m,i)=>({material:m.material,rows:counts[i],pixels:label.reduce((s,v)=>s+(v===i),0)}))};
 }
 module.exports={derive};
 
@@ -72,5 +88,5 @@ if(require.main===module){
  for(const k of ['source','palette','materials','out','map'])if(!o[k])throw Error('Missing --'+k);
  const r=derive(PNG.sync.read(fs.readFileSync(o.source)),parsePalette(JSON.parse(fs.readFileSync(o.palette))),JSON.parse(fs.readFileSync(o.materials)),{flat:o.flat?+o.flat:12});
  fs.writeFileSync(o.out,JSON.stringify({regions:r.regions,inventory:r.inventory})+'\n',{flag:'wx'});fs.writeFileSync(o.map,PNG.sync.write(r.map),{flag:'wx'});
- console.log(JSON.stringify({regions:r.regions.length,lineMarks:r.lineMarks,materials:r.summary},null,1));
+ console.log(JSON.stringify({regions:r.regions.length,lineMarks:r.lineMarks,offPaletteFlatAreas:r.offPaletteFlatAreas,materials:r.summary},null,1));
 }

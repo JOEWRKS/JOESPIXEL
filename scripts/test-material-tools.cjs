@@ -46,6 +46,19 @@ test('a declared thin line mark seeds its line material; undeclared it goes to t
  const r=derive(s,palette,marked,{flat:12});assert.equal(label(r,10,5),'ink');assert.equal(label(r,10,8),'leather');assert.deepEqual(r.lineMarks,[{material:'ink',name:'seam',pixels:20}]);
  assert.throws(()=>derive(s,palette,materials.map(m=>m.material==='ink'?{...m,lineMarks:[{name:'none',sourceRegion:[2,8,5,2],samples:[[60,40,30]],contextSamples:[[160,90,54]],observation:'x'}]}:m)),/no source pixels/);
 });
+test('a shared-colour area enclosed by a material that does not list it stops; a mark resolves it',()=>{
+ // A 6x6 light disc (shared by leather and hair) inside a 3px ink band: following the surroundings
+ // would paint it ink. The observer must say whose it is.
+ const s=image((x,y)=>x>=8&&x<14&&y>=3&&y<9?[240,240,240]:x>=5&&x<17?[32,32,32]:[160,90,54]);
+ assert.throws(()=>derive(s,palette,materials,{flat:6,minArea:16}),e=>/does not list its colour/.test(e.message)&&e.contradictions[0].bbox.join(',')==='9,4,12,7'&&e.contradictions[0].assigned==='ink');
+ assert.doesNotThrow(()=>derive(s,palette,materials,{flat:6,minArea:64}),'smaller than minArea is left to the surroundings');
+ const marked=materials.map(m=>m.material==='leather'?{...m,lineMarks:[{name:'button',sourceRegion:[8,3,6,6],samples:[[240,240,240]],contextSamples:[[32,32,32]],observation:'Light button centre inside its ink ring.'}]}:m);
+ const r=derive(s,palette,marked,{flat:6,minArea:16});assert.equal(label(r,10,5),'leather');
+});
+test('a flat area far from every palette colour is reported, not painted silently',()=>{
+ const s=image((x,y)=>x>=6&&x<12&&y>=3&&y<9?[228,183,119]:[160,90,54]),r=derive(s,palette,materials,{flat:6,minArea:16});
+ assert.equal(r.offPaletteFlatAreas.length,1);assert.deepEqual(r.offPaletteFlatAreas[0].bbox,[7,4,10,7]);assert(r.offPaletteFlatAreas[0].distance>40);
+});
 test('capacity probe keeps the same canvas and writes one-dot ink on the exterior',()=>{
  const s=image((x,y)=>x>=6&&x<18&&y>=3&&y<9?[160,90,54]:[255,255,255]);
  const [a,b]=probe(s,palette,{background:'#FFFFFF',ink:['#202020'],candidates:[[12,6],[6,3]]});
