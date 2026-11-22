@@ -116,7 +116,7 @@ C:/Users/tjdwo/.codex/visualizations/2026/10/15/01a13ea6-d785-7302-bf6e-4ddf6c26
 
 과거 `rapi-face-ownership-fix-20261119`는 사용자가 거부한 결과이고, 브라우저에 남은 `rapi-original-proportions-20261119/revision-3`도 이번 최신 결과가 아니다.
 
-## Claude 보강 — 2026-11-21 (`2.26.0-eight-stage.7-claude`, 브랜치 `claude/eight-stage-hardening`)
+## Claude 보강 — 2026-11-21 (`2.26.0-eight-stage.8-claude`, 브랜치 `claude/eight-stage-hardening`)
 
 새 원안 1장(오리지널 정비공, 128×192, 8px)을 실제로 생성해 8단계 정식 경로로 실행하면서 확인한 공용 코드 문제를 고쳤다. 사례 축약본과 근거는 `handoff/mechanic-eyes/`에 있다.
 
@@ -135,11 +135,12 @@ C:/Users/tjdwo/.codex/visualizations/2026/10/15/01a13ea6-d785-7302-bf6e-4ddf6c26
 | 특징 목록의 기준이 배치와 연결되지 않음 | 특징 목록에 `nose: 코 표시가 남아야 함`이 있었지만 어떤 정책도 코를 배치하지 않았고, 초안이 코 없이 검수 대기로 나감 | `features[].placement` 경로: `formPolicy`(이름 지정), `measured`(원본 영역·색 → 실행 뒤 그 색 칸이 1개 이상인지 측정, 없으면 중단), `omitted`(이유 기록). 캐릭터의 `nose`·`mouth`는 경로 필수. 경로는 관찰자가 선언하고 모든 특징에 같은 방식으로 검사 |
 | 홍채 조각이 눈 바깥 윤곽선·피부를 칠함 | 큰 눈 오른쪽 원본은 홍채 → 테두리 → 흰자 띠 → 검은 눈 윤곽(5px) → 피부. `iris-right` 조각은 홍채·어두운 홍채·흰자만 허용해 검은 윤곽을 어두운 홍채로, 다각형 안 피부를 흰자로 칠함. 결과는 눈 모서리의 2×3칸 어두운 초록 덩어리(run-10). 이전 기록은 역할별 칸 수만 보고 이를 놓쳤다 | 조각 안 화소가 모든 조각 역할보다 눈 주변 재질 색(눈 창 안, 다각형 밖에 1칸 이상 있는 색: 피부·외곽선 잉크)에 더 가까우면 그 재질에 남긴다. 조각 역할과 같은 팔레트 색이면(동공과 잉크) 조각이 결정. 사이 회색 안티앨리어싱은 주변 재질이 아니라 조각에 남는다(`partitionPixelsLeftToSurroundingMaterial`) |
 | 눈 칸이 격자 위상에 따라 뒤집힘 | 같은 원안·관찰에서 원안을 몇 px만 밀어도 하이라이트 줄·눈꺼풀 두께·어두운 홍채 띠가 바뀌고 4/64 위상에서 중단 | 선택형 `placement: "source-construction"`: 역할 분류 결과를 집계 측정(백분위 범위, 열별 중앙값, 면적 비율, 중심)으로만 쓰고 고정 반올림 규칙으로 칸을 짠다. 64위상에서 중단 0, 작은 눈 홍채 구조 1가지. 설계·결과는 `references/eye-construction-design.md` |
+| 머리·옷 안쪽 선이 잡음 | 정비공 머리 안 가닥선(원안 2~4px, 약 15개)과 바지 주름이 모두 1칸 잉크가 되어 바깥 윤곽과 같은 무게로 보임. 측정상 윤곽 끊김은 0곳이고, 원안 잉크가 6px 미만인 잉크 칸은 6개뿐이었다. 즉 배치 결함이 아니라 선 무게 문제였다 | 관찰 선언 `outlinePolicy.interiorShade`: 한 재질 안쪽의 잉크 칸은 그 재질의 선언 색으로 바꾼다. 윤곽·재질 경계·특징은 잉크로 남긴다. 정비공은 사용자 선택에 따라 머리·작업복만 적용(340칸). 모든 재질에 적용하면 부츠 끈·재킷 주머니가 흐려졌다 |
 | 4단계 후보 PNG 생성 수단 없음 | 직사각형 격자 시험을 매번 직접 작성 | `scripts/capacity-probe.cjs` |
 
 검증:
 
-- 전체 시험 19/19 파일 통과(`test-package.cjs` 기준; `test-eye-construction.cjs` 추가 — 위상 시험은 `source-partitions`로 바꾸면 실패; `test-feature-placement.cjs` 추가, `test-material-tools.cjs`에 `lineMarks` 시험 추가, `test-eye-hardening.cjs`에 윤곽선 시험 추가 — 9754748 코드에서 실패, 수정 후 통과). 기존 `test-eye-policy`의 "얇은 눈꺼풀과 동공" 시험이 첫 정리 조건(절대 1/4칸)의 결함을 잡아, 획 중앙값 기준을 추가했다.
+- 전체 시험 20/20 파일 통과(`test-package.cjs` 기준; `test-interior-line-shade.cjs` 추가; `test-eye-construction.cjs` 추가 — 위상 시험은 `source-partitions`로 바꾸면 실패; `test-feature-placement.cjs` 추가, `test-material-tools.cjs`에 `lineMarks` 시험 추가, `test-eye-hardening.cjs`에 윤곽선 시험 추가 — 9754748 코드에서 실패, 수정 후 통과). 기존 `test-eye-policy`의 "얇은 눈꺼풀과 동공" 시험이 첫 정리 조건(절대 1/4칸)의 결함을 잡아, 획 중앙값 기준을 추가했다.
 - 라피 재현은 기존 기록과 동일하다(`differentFromExpected 0`, 기존 후보 대비 34칸 그대로).
 - `test-eye-hardening.cjs`는 14개다. 두께 시험은 한 줄로 반올림되는 띠(결정 불필요)·미지정 두 줄 띠(중단)·`source`/`one-dot` 결과·정비공 눈꺼풀/어두운 홍채 비율·타원 조각을 확인한다.
 - 처음 4개 시험은 77e9247 코드에서 실패하고 수정 후 통과한다.

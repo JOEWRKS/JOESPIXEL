@@ -142,6 +142,8 @@ node scripts/run-pixel-workflow.cjs verify /absolute/path/new-run
 
 `joint-source-band`는 `formPolicy`의 필수 선을 소유권으로 받아 함께 배치하므로 `mode`가 필요 없다. 사용하지 않는 `mode`를 통과용으로 넣지 않는다. `mode: "source-silhouette-width"`는 `layout`이 없는 구 외곽선 경로에서만 필수 선과 함께 요구된다.
 
+**안쪽 선 색(`interiorShade`, 선택).** `outlinePolicy.interiorShade: [{material, color, observation}]`. 배치된 잉크 칸 중 상하좌우의 잉크 아닌 이웃이 모두 선언된 한 재질이고 8방향 이웃에 배경이 없는 칸은, 그 재질의 선언 색(재질 색 중 하나, 잉크 색 불가)으로 바뀐다. 바깥 윤곽, 서로 다른 재질 사이의 선, 눈·필수 특징 칸은 잉크로 남는다. 머리 가닥처럼 가는 안쪽 선이 많은 면에서, 8px 칸의 1칸 잉크가 바깥 윤곽과 같은 무게가 되어 잡음처럼 보일 때 쓴다. 적용 재질은 관찰자가 고르며 저장 감사도 같은 결정으로 검사한다(`interiorShade` 보고).
+
 검사 범위는 선언된 원본 선 영역이다. `outsideDeclaredBand`를 전체 외곽선 검사 완료로 해석하지 않는다. 실제 선 누락·곡선 흐름·색면의 외부 노출을 초안과 별도로 비교한다.
 
 `mixed` 재질의 외부 경계는 원본 전경 점유율에서 별도로 배치한다. 같은 색의 넓은 재질 면을 중심선으로 축소하지 않으며, 기존 외부 선 경로를 교체한다. 내부의 닫힌 틈과 고립된 선은 이 외부 경계 경로에 포함하지 않는다. `sourceExteriorRequired`가 있는 실행은 원본에서 계산한 `sourceExterior`의 점유·선색 검사까지 실행해야 통과하며, 새 경로/채움 기록과 저장본이 일치한다는 이유만으로 원안 형태 보존을 인정하지 않는다. 정수 격자의 모서리 단순화와 실제 인상은 별도 시각 검수 대상이다.

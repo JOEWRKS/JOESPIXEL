@@ -288,6 +288,15 @@ function buildNative(PNG, source, palette, width, height, background, sampling =
       }
       const assignedFeatures=[...ownership.cells].map(p=>[p,eyes.image.data.readUInt32BE(p*4)]);
       const result=owned.joint(PNG,source,eyes.image,palette,outlinePolicy,material,ownership,built.sourceLabels,trace);
+      // Observer-declared interior line tone. It recolours placed lines only,
+      // and the stroke audit below checks the saved pixels against the same
+      // decision (expected colours are updated, not skipped).
+      if(outlinePolicy.interiorShade){
+        const shaded=require('./interior-line-shade.cjs').applyInteriorShade(result.image,outlinePolicy,material?.plan,palette,ownership.cells);
+        const tone=new Map(shaded.cells);result.report.expectedColors=result.report.expectedColors.map(([p,c])=>tone.has(p)?[p,tone.get(p)]:[p,c]);
+        result.report.interiorShade={rule:shaded.rule,cells:shaded.cells.length,byMaterial:shaded.byMaterial};
+        emit('interior-line-shade',result.image,result.report.interiorShade);
+      }
       requireClaims(result.image,assignedFeatures,'Joint boundary placement');
       requireClaims(result.image,built.formReport?.expectedColors??[],'Joint boundary placement');
       result.report.surfaceAudit=require('./material-surface-layout.cjs').auditMaterialSurfaces(result.image,result.report.surfaceLayout);
