@@ -59,6 +59,16 @@ test('a flat area far from every palette colour is reported, not painted silentl
  const s=image((x,y)=>x>=6&&x<12&&y>=3&&y<9?[228,183,119]:[160,90,54]),r=derive(s,palette,materials,{flat:6,minArea:16});
  assert.equal(r.offPaletteFlatAreas.length,1);assert.deepEqual(r.offPaletteFlatAreas[0].bbox,[7,4,10,7]);assert(r.offPaletteFlatAreas[0].distance>40);
 });
+test('a declared line material continues along a thin seam; its thick edges do not grow',()=>{
+ // Thick flat ink band x0-5 (seeds ink) with a soft one-sided edge at x6, then leather; a 3px
+ // seam at y5-7 runs from the band into the leather. Its core is never flat.
+ const s=image((x,y)=>x<6?[32,32,32]:y===6&&x<20?[34,32,32]:(y===5||y===7)&&x<20?[70,50,40]:x===6?[96,64,48]:[160,90,54]);
+ const plain=derive(s,palette,materials,{flat:6});assert.equal(label(plain,14,6),'leather','undeclared: the fill takes the seam');
+ const r=derive(s,palette,materials.map(m=>m.material==='ink'?{...m,line:true}:m),{flat:6});
+ for(let x=7;x<20;x++)assert.equal(label(r,x,6),'ink','seam core '+x);
+ assert.equal(label(r,6,2),label(plain,6,2),'one-sided edge of the thick band is unchanged');assert.equal(label(r,14,9),'leather');assert(r.lineContinuityPixels>0);
+ assert.throws(()=>derive(s,palette,materials.map(m=>m.material==='ink'?{...m,line:'yes'}:m)),/line must be true/);
+});
 test('capacity probe keeps the same canvas and writes one-dot ink on the exterior',()=>{
  const s=image((x,y)=>x>=6&&x<18&&y>=3&&y<9?[160,90,54]:[255,255,255]);
  const [a,b]=probe(s,palette,{background:'#FFFFFF',ink:['#202020'],candidates:[[12,6],[6,3]]});

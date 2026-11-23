@@ -9,6 +9,13 @@
 // It is a spatial helper, not semantic recognition: wrong tables give wrong regions.
 // The output {regions, inventory} goes into materialPlan; every region is listed under its
 // material so the inventory check stays executable.
+// A material declared "line": true (the outline ink) continues along thin source lines before
+// the plain flood: an unlabelled pixel whose nearest palette colour is that material's own
+// (unshared) colour and which is darker by 24+ than both sides at 2-4 px in some direction (a
+// line core, not the one-sided antialias edge of a thick stroke) joins its line neighbour. A
+// 3-4 px pocket seam has no flat core, so without this the jacket flood takes it and the seam
+// is gone before any line stage sees it. Other materials never get this priority: a dark
+// cloth shadow next to the ink would otherwise eat the outline.
 // Two observation gaps are surfaced instead of silently painted:
 // - a flat area whose colours are all shared takes its surroundings; if the surrounding material
 //   does not list that colour (a grey button centre inside its ink ring, where the grey is shared
@@ -70,6 +77,12 @@ function derive(source,palette,materials,{flat=12,minArea=32,farColor=40}={}){
    if(!pixels)throw Error('Line mark has no source pixels nearer its samples than its context: '+mark.name);
    lineMarks.push({material:m.material,name:mark.name,pixels});}});
  if(!queue.length)throw Error('Source has no flat pixels to seed materials');
+ const lum=p=>.2126*d[p*4]+.7152*d[p*4+1]+.0722*d[p*4+2];
+ const ridge=p=>{const x=p%w,y=Math.floor(p/w),v=lum(p);for(const [dx,dy] of [[1,0],[0,1],[1,1],[1,-1]])for(let r=2;r<=4;r++){const ax=x+dx*r,ay=y+dy*r,bx=x-dx*r,by=y-dy*r;if(ax<0||bx<0||ay<0||by<0||ax>=w||bx>=w||ay>=h||by>=h)continue;if(Math.min(lum(ay*w+ax),lum(by*w+bx))-v>=24)return true;}return false;};
+ materials.forEach(m=>{if(m.line!==undefined&&m.line!==true)throw Error('line must be true when declared: '+m.material);});
+ const enclosed=(p,m)=>{const x=p%w,y=Math.floor(p/w);for(const [dx,dy] of [[1,0],[-1,0],[0,1],[0,-1]]){const a=x+dx,b=y+dy;if(a<0||b<0||a>=w||b>=h)return false;if(owner[nearest((b*w+a)*4)]!==m)return false;}return true;};
+ const lineIds=new Set(materials.flatMap((m,i)=>m.line?[i]:[]));let continued=0;
+ if(lineIds.size){for(let q=0;q<queue.length;q++){const p=queue[q];if(!lineIds.has(label[p]))continue;const x=p%w,y=Math.floor(p/w);for(const [dx,dy] of [[1,0],[-1,0],[0,1],[0,-1]]){const a=x+dx,b=y+dy;if(a<0||b<0||a>=w||b>=h)continue;const n=b*w+a;if(label[n]<0&&owner[nearest(n*4)]===label[p]&&(ridge(n)||enclosed(n,label[p]))){label[n]=label[p];queue.push(n);continued++;}}}}
  for(let q=0;q<queue.length;q++){const p=queue[q],x=p%w,y=Math.floor(p/w);for(const [dx,dy] of [[1,0],[-1,0],[0,1],[0,-1]]){const a=x+dx,b=y+dy;if(a<0||b<0||a>=w||b>=h)continue;const n=b*w+a;if(label[n]<0){label[n]=label[p];queue.push(n);}}}
  const contradictions=[];for(const {area,color} of sharedOnly){const got=new Map();for(const p of area)got.set(label[p],(got.get(label[p])||0)+1);const m=[...got].sort((a,b)=>b[1]-a[1])[0][0];
   if(m<0||!materials[m].colors.includes(palette[color].hex))contradictions.push({bbox:box(area),pixels:area.length,color:palette[color].hex,listedBy:owners[color].map(i=>materials[i].material),assigned:m<0?null:materials[m].material});}
@@ -79,7 +92,7 @@ function derive(source,palette,materials,{flat=12,minArea=32,farColor=40}={}){
   regions.push({id:`${mat.material}-${counts[m]++}`,material:mat.material,polygon:[[x,y],[e,y],[e,y+1],[x,y+1]],colors:mat.colors,baseColor:mat.baseColor,boundaryRoles:[],observation:mat.observation??'Material table observation; each connected flat area votes once and transition pixels take the nearest area.'});x=e;}}
  const map=new PNG({width:w,height:h});for(let p=0;p<w*h;p++){const c=rgb[hex.get(materials[label[p]].baseColor)];map.data.set([...c,255],p*4);}
  const inventory=materials.map(m=>({id:m.material,decision:'assigned',regionIds:regions.filter(r=>r.material===m.material).map(r=>r.id),observation:m.observation??'Material table observation.'})).filter(i=>i.regionIds.length);
- return {regions,inventory,map,lineMarks,offPaletteFlatAreas:offPalette.sort((a,b)=>b.distance-a.distance),summary:materials.map((m,i)=>({material:m.material,rows:counts[i],pixels:label.reduce((s,v)=>s+(v===i),0)}))};
+ return {regions,inventory,map,lineMarks,lineContinuityPixels:continued,offPaletteFlatAreas:offPalette.sort((a,b)=>b.distance-a.distance),summary:materials.map((m,i)=>({material:m.material,rows:counts[i],pixels:label.reduce((s,v)=>s+(v===i),0)}))};
 }
 module.exports={derive};
 
@@ -88,5 +101,5 @@ if(require.main===module){
  for(const k of ['source','palette','materials','out','map'])if(!o[k])throw Error('Missing --'+k);
  const r=derive(PNG.sync.read(fs.readFileSync(o.source)),parsePalette(JSON.parse(fs.readFileSync(o.palette))),JSON.parse(fs.readFileSync(o.materials)),{flat:o.flat?+o.flat:12});
  fs.writeFileSync(o.out,JSON.stringify({regions:r.regions,inventory:r.inventory})+'\n',{flag:'wx'});fs.writeFileSync(o.map,PNG.sync.write(r.map),{flag:'wx'});
- console.log(JSON.stringify({regions:r.regions.length,lineMarks:r.lineMarks,offPaletteFlatAreas:r.offPaletteFlatAreas,materials:r.summary},null,1));
+ console.log(JSON.stringify({regions:r.regions.length,lineMarks:r.lineMarks,lineContinuityPixels:r.lineContinuityPixels,offPaletteFlatAreas:r.offPaletteFlatAreas,materials:r.summary},null,1));
 }
